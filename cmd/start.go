@@ -114,6 +114,11 @@ The agent will be created from a template and run in a detached container.`,
 			}
 		}
 
+		// -a flag overrides detached config
+		if cmd.Flags().Changed("attach") {
+			detached = !attach
+		}
+
 		if model != "" {
 			resolvedModel = model
 		}
@@ -134,18 +139,12 @@ The agent will be created from a template and run in a detached container.`,
 			resolvedImage = tmuxImage
 		}
 
-		// If user requested attach, we must run detached first then attach
-		// OR we just run it interactive.
-		// Let's say if attach is requested, we run detached then attach.
-		// If detached is false in config, we run interactive and ignore attach flag.
-		
 		runCfg := runtime.RunConfig{
 			Name:      agentName,
 			Image:     resolvedImage,
 			HomeDir:   agentHome,
 			Workspace: agentWorkspace,
 			Auth:      auth,
-			Detached:  detached || attach,
 			UseTmux:   useTmux,
 			Model:     resolvedModel,
 			Env: []string{
@@ -163,11 +162,9 @@ The agent will be created from a template and run in a detached container.`,
 			return fmt.Errorf("failed to launch container: %w", err)
 		}
 
-		if runCfg.Detached {
+		if detached {
 			fmt.Printf("Agent '%s' launched successfully (ID: %s)\n", agentName, id)
-		}
-
-		if attach && runCfg.Detached {
+		} else {
 			fmt.Printf("Attaching to agent '%s'...\n", agentName)
 			return rt.Attach(context.Background(), id)
 		}

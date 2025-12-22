@@ -23,12 +23,7 @@ func NewAppleContainerRuntime() *AppleContainerRuntime {
 }
 
 func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (string, error) {
-	args := []string{"run"}
-	if config.Detached {
-		args = append(args, "-d")
-	} else {
-		args = append(args, "-it")
-	}
+	args := []string{"run", "-d"}
 	args = append(args, "-t", "--name", config.Name)
 
 	// container CLI doesn't support --init
@@ -117,24 +112,15 @@ func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (stri
 		args = append(args, "gemini")
 	}
 
-	if config.Detached {
-		cmd := exec.CommandContext(ctx, r.Command, args...)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("container run failed: %w (output: %s)", err, string(out))
-		}
-		return strings.TrimSpace(string(out)), nil
+	if os.Getenv("GSWARM_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "Debug: %s %s\n", r.Command, strings.Join(args, " "))
 	}
-
-	// Interactive mode
-	cmd := exec.Command(r.Command, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("container run failed: %w", err)
+	cmd := exec.CommandContext(ctx, r.Command, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("container run failed: %w (output: %s)", err, string(out))
 	}
-	return "", nil
+	return strings.TrimSpace(string(out)), nil
 }
 
 func (r *AppleContainerRuntime) Stop(ctx context.Context, id string) error {
@@ -238,30 +224,17 @@ func (r *AppleContainerRuntime) Attach(ctx context.Context, id string) error {
 		useTmux = true
 	}
 
-	var args []string
-	if useTmux {
-		args = []string{"exec", "-it", id, "tmux", "attach", "-t", "gswarm"}
-	} else {
-		// Apple 'container' CLI does not support 'attach'.
-		// We use 'exec -it <id> /bin/bash' as a proxy for an interactive session.
-		args = []string{"exec", "-it", id, "/bin/bash"}
+	if !useTmux {
+		return fmt.Errorf("apple 'container' runtime requires tmux to attach to an interactive session. Please ensure the agent was started with tmux support")
 	}
+
+	args := []string{"exec", "-it", id, "tmux", "attach", "-t", "gswarm"}
 
 	cmd := exec.Command(r.Command, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err = cmd.Run()
-	if err != nil && !useTmux {
-		// Fallback to /bin/sh if /bin/bash is not available
-		args[3] = "/bin/sh"
-		cmd = exec.Command(r.Command, args...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
-	}
-	return err
+	return cmd.Run()
 }
 
 func (r *AppleContainerRuntime) ImageExists(ctx context.Context, image string) (bool, error) {

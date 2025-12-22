@@ -21,7 +21,6 @@ type RunConfig struct {
 	Env       []string
 	Labels    map[string]string
 	Auth      config.AuthConfig
-	Detached  bool
 	UseTmux   bool
 	Model     string
 }

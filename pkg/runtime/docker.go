@@ -19,12 +19,7 @@ func NewDockerRuntime() *DockerRuntime {
 }
 
 func (r *DockerRuntime) Run(ctx context.Context, config RunConfig) (string, error) {
-	args := []string{"run"}
-	if config.Detached {
-		args = append(args, "-d")
-	} else {
-		args = append(args, "-it")
-	}
+	args := []string{"run", "-d"}
 	args = append(args, "-t", "--init", "--name", config.Name)
 
 	if config.HomeDir != "" {
@@ -95,24 +90,12 @@ func (r *DockerRuntime) Run(ctx context.Context, config RunConfig) (string, erro
 		args = append(args, "gemini")
 	}
 
-	if config.Detached {
-		cmd := exec.CommandContext(ctx, r.Command, args...)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("docker run failed: %w (output: %s)", err, string(out))
-		}
-		return strings.TrimSpace(string(out)), nil
+	cmd := exec.CommandContext(ctx, r.Command, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker run failed: %w (output: %s)", err, string(out))
 	}
-
-	// Interactive mode
-	cmd := exec.Command(r.Command, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("docker run failed: %w", err)
-	}
-	return "", nil
+	return strings.TrimSpace(string(out)), nil
 }
 
 func (r *DockerRuntime) Stop(ctx context.Context, id string) error {
