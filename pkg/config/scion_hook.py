@@ -51,16 +51,22 @@ def main():
         state = "THINKING"
         prompt = input_data.get("prompt", "")
         log_msg = f"User prompt: {prompt[:100]}..." if prompt else "Planning turn"
+    elif event == "BeforeModel":
+        state = "THINKING"
+        log_msg = "LLM call started"
+    elif event == "AfterModel":
+        state = "IDLE"
+        log_msg = "LLM call completed"
     elif event == "BeforeTool":
         tool_name = input_data.get("tool_name")
         state = f"EXECUTING ({tool_name})"
         log_msg = f"Running tool: {tool_name}"
     elif event == "AfterTool":
-        state = "THINKING"
+        state = "IDLE"
         tool_name = input_data.get("tool_name")
         log_msg = f"Tool {tool_name} completed"
     elif event == "Notification":
-        state = "WAITING"
+        state = "WAITING_FOR_INPUT"
         log_msg = f"Notification: {input_data.get('message')}"
     elif event == "AfterAgent":
         state = "IDLE"
