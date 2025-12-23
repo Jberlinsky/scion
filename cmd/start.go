@@ -184,6 +184,13 @@ form the task prompt.`,
 			resolvedImage = tmuxImage
 		}
 
+		agentEnv := []string{
+			fmt.Sprintf("GEMINI_AGENT_NAME=%s", agentName),
+		}
+		if !strings.HasPrefix(strings.TrimSpace(config.DefaultSystemPrompt), "# Placeholder") {
+			agentEnv = append(agentEnv, "GEMINI_SYSTEM_MD=/home/gemini/.gemini/system_prompt.md")
+		}
+
 		runCfg := runtime.RunConfig{
 			Name:      agentName,
 			Image:     resolvedImage,
@@ -193,9 +200,7 @@ form the task prompt.`,
 			UseTmux:   useTmux,
 			Model:     resolvedModel,
 			Task:      task,
-			Env: []string{
-				fmt.Sprintf("GEMINI_AGENT_NAME=%s", agentName),
-			},
+			Env:       agentEnv,
 			Labels: map[string]string{
 				"scion.agent":      "true",
 				"scion.name":       agentName,
