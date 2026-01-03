@@ -40,7 +40,7 @@ func TestGeneric_GetEnv(t *testing.T) {
 		GoogleAppCredentials: "/path/to/creds.json",
 	}
 
-	env := g.GetEnv("test-agent", "test-user", auth)
+	env := g.GetEnv("test-agent", "", "test-user", auth)
 
 	expectedEnv := map[string]string{
 		"SCION_AGENT_NAME":             "test-agent",

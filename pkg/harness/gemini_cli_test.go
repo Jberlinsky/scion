@@ -96,3 +96,56 @@ func TestGeminiDiscoverAuth(t *testing.T) {
 		t.Errorf("expected GeminiAPIKey to be 'test-api-key', got '%s'", auth.GeminiAPIKey)
 	}
 }
+
+func TestGeminiHasSystemPrompt(t *testing.T) {
+	agentHome, err := os.MkdirTemp("", "agent-home-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(agentHome)
+
+	g := &GeminiCLI{}
+	geminiDir := filepath.Join(agentHome, ".gemini")
+	if err := os.MkdirAll(geminiDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	promptPath := filepath.Join(geminiDir, "system_prompt.md")
+
+	// 1. No file
+	if g.HasSystemPrompt(agentHome) {
+		t.Error("expected HasSystemPrompt to be false when file is missing")
+	}
+
+	// 2. Placeholder content
+	if err := os.WriteFile(promptPath, []byte("# Placeholder"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if g.HasSystemPrompt(agentHome) {
+		t.Error("expected HasSystemPrompt to be false when content is placeholder")
+	}
+
+	// 3. Placeholder content with whitespace
+	if err := os.WriteFile(promptPath, []byte("  # Placeholder  \n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if g.HasSystemPrompt(agentHome) {
+		t.Error("expected HasSystemPrompt to be false when content is placeholder with whitespace")
+	}
+
+	// 4. Real content
+	if err := os.WriteFile(promptPath, []byte("# My Prompt\nDo something."), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if !g.HasSystemPrompt(agentHome) {
+		t.Error("expected HasSystemPrompt to be true when content is real")
+	}
+
+	// 5. Empty content
+	if err := os.WriteFile(promptPath, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if g.HasSystemPrompt(agentHome) {
+		t.Error("expected HasSystemPrompt to be false when content is empty")
+	}
+}

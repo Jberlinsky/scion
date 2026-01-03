@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/config"
@@ -65,11 +66,11 @@ func (g *GeminiCLI) DiscoverAuth(agentHome string) api.AuthConfig {
 	return auth
 }
 
-func (g *GeminiCLI) GetEnv(agentName string, unixUsername string, auth api.AuthConfig) map[string]string {
+func (g *GeminiCLI) GetEnv(agentName string, agentHome string, unixUsername string, auth api.AuthConfig) map[string]string {
 	env := make(map[string]string)
 
 	env["GEMINI_AGENT_NAME"] = agentName
-	if g.HasSystemPrompt() {
+	if g.HasSystemPrompt(agentHome) {
 		env["GEMINI_SYSTEM_MD"] = fmt.Sprintf("%s/%s/system_prompt.md", util.GetHomeDir(unixUsername), g.DefaultConfigDir())
 	}
 
@@ -165,7 +166,19 @@ func (g *GeminiCLI) DefaultConfigDir() string {
 	return ".gemini"
 }
 
-func (g *GeminiCLI) HasSystemPrompt() bool {
+func (g *GeminiCLI) HasSystemPrompt(agentHome string) bool {
+	if agentHome == "" {
+		return false
+	}
+	promptPath := filepath.Join(agentHome, g.DefaultConfigDir(), "system_prompt.md")
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		return false
+	}
+	content := strings.TrimSpace(string(data))
+	if content == "" || content == "# Placeholder" {
+		return false
+	}
 	return true
 }
 

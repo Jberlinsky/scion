@@ -93,7 +93,7 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 				addVolume(v)
 			}
 		}
-		for k, v := range config.Harness.GetEnv(config.Name, config.UnixUsername, config.Auth) {
+		for k, v := range config.Harness.GetEnv(config.Name, config.HomeDir, config.UnixUsername, config.Auth) {
 			addEnv(k, v)
 		}
 	}

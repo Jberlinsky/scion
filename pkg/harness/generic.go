@@ -58,7 +58,7 @@ func (g *Generic) DiscoverAuth(agentHome string) api.AuthConfig {
 	return auth
 }
 
-func (g *Generic) GetEnv(agentName string, unixUsername string, auth api.AuthConfig) map[string]string {
+func (g *Generic) GetEnv(agentName string, agentHome string, unixUsername string, auth api.AuthConfig) map[string]string {
 	env := make(map[string]string)
 
 	env["SCION_AGENT_NAME"] = agentName
@@ -148,7 +148,7 @@ func (g *Generic) DefaultConfigDir() string {
 	return ".scion"
 }
 
-func (g *Generic) HasSystemPrompt() bool {
+func (g *Generic) HasSystemPrompt(agentHome string) bool {
 	return false
 }
 

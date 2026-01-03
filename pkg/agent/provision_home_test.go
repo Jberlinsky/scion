@@ -1,0 +1,90 @@
+package agent
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestProvisionAgentHomeCopy(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Move to tmpDir to avoid being inside the project's git repo
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Initialize dummy git repo
+	runCmd(t, "git", "init")
+	runCmd(t, "git", "config", "user.email", "test@example.com")
+	runCmd(t, "git", "config", "user.name", "Test User")
+	os.WriteFile(filepath.Join(tmpDir, "initial"), []byte("initial"), 0644)
+	runCmd(t, "git", "add", "initial")
+	runCmd(t, "git", "commit", "-m", "initial commit")
+
+	// Mock HOME for global settings and templates
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	projectDir := filepath.Join(tmpDir, "project")
+	projectScionDir := filepath.Join(projectDir, ".scion")
+	
+	// Add .scion/agents/ to gitignore to satisfy ProvisionAgent's security check
+	os.MkdirAll(projectDir, 0755)
+	os.WriteFile(filepath.Join(projectDir, ".gitignore"), []byte(".scion/agents/\n"), 0644)
+	runCmd(t, "git", "add", ".gitignore")
+	runCmd(t, "git", "commit", "-m", "add gitignore")
+
+	os.MkdirAll(filepath.Join(projectScionDir, "templates", "test-tpl", "home"), 0755)
+
+	tplDir := filepath.Join(projectScionDir, "templates", "test-tpl")
+	
+	// Create file in template root (should NOT be copied if home exists)
+	os.WriteFile(filepath.Join(tplDir, "root-file.txt"), []byte("root"), 0644)
+	
+	// Create file in template home (SHOULD be copied)
+	os.WriteFile(filepath.Join(tplDir, "home", "home-file.txt"), []byte("home"), 0644)
+	
+	// Create scion-agent.json in template root
+	os.WriteFile(filepath.Join(tplDir, "scion-agent.json"), []byte(`{"harness": "test"}`), 0644)
+
+	// Provision agent
+	agentName := "test-agent"
+	agentHome, _, _, err := ProvisionAgent(context.Background(), agentName, "test-tpl", "", projectScionDir, "", "")
+	if err != nil {
+		t.Fatalf("ProvisionAgent failed: %v", err)
+	}
+
+	// Verify home-file.txt exists in agentHome
+	if _, err := os.Stat(filepath.Join(agentHome, "home-file.txt")); os.IsNotExist(err) {
+		t.Errorf("expected home-file.txt to be copied to agent home")
+	}
+
+	// Verify root-file.txt does NOT exist in agentHome
+	if _, err := os.Stat(filepath.Join(agentHome, "root-file.txt")); err == nil {
+		t.Errorf("expected root-file.txt NOT to be copied to agent home when home/ directory exists")
+	}
+	
+	// Verify scion-agent.json does NOT exist in agentHome (it's in template root)
+	if _, err := os.Stat(filepath.Join(agentHome, "scion-agent.json")); err == nil {
+		t.Errorf("expected scion-agent.json NOT to be copied to agent home when home/ directory exists")
+	}
+}
+
+func runCmd(t *testing.T, name string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("command %s %v failed: %v\nOutput: %s", name, args, err, string(output))
+	}
+}
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+)

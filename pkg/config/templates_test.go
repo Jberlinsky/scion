@@ -49,8 +49,8 @@ func TestCreateTemplate(t *testing.T) {
 	// Verify key files exist
 	files := []string{
 		"scion-agent.json",
-		".bashrc",
-		filepath.Join(".gemini", "settings.json"),
+		filepath.Join("home", ".bashrc"),
+		filepath.Join("home", ".gemini", "settings.json"),
 	}
 	for _, f := range files {
 		if _, err := os.Stat(filepath.Join(expectedPath, f)); os.IsNotExist(err) {
@@ -279,8 +279,8 @@ func TestCloneTemplate(t *testing.T) {
 	// Verify key files exist in destination
 	files := []string{
 		"scion-agent.json",
-		".bashrc",
-		filepath.Join(".gemini", "settings.json"),
+		filepath.Join("home", ".bashrc"),
+		filepath.Join("home", ".gemini", "settings.json"),
 	}
 	for _, f := range files {
 		if _, err := os.Stat(filepath.Join(expectedPath, f)); os.IsNotExist(err) {

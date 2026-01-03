@@ -8,12 +8,12 @@ import (
 type Harness interface {
 	Name() string
 	DiscoverAuth(agentHome string) AuthConfig
-	GetEnv(agentName string, unixUsername string, auth AuthConfig) map[string]string
+	GetEnv(agentName string, agentHome string, unixUsername string, auth AuthConfig) map[string]string
 	GetCommand(task string, resume bool, baseArgs []string) []string
 	PropagateFiles(homeDir, unixUsername string, auth AuthConfig) error
 	GetVolumes(unixUsername string, auth AuthConfig) []VolumeMount
 	DefaultConfigDir() string
-	HasSystemPrompt() bool
+	HasSystemPrompt(agentHome string) bool
 
 	// Provision performs harness-specific setup during agent creation.
 	// This is called after templates are copied and scion-agent.json is written.

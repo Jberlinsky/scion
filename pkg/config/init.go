@@ -18,11 +18,13 @@ func GetDefaultSettingsData() ([]byte, error) {
 }
 
 func SeedTemplateDir(templateDir, templateName, harness, embedDir, configDirName string, force bool) error {
+	homeDir := filepath.Join(templateDir, "home")
 	// Create directories
 	dirs := []string{
 		templateDir,
-		filepath.Join(templateDir, configDirName),
-		filepath.Join(templateDir, ".config", "gcloud"),
+		homeDir,
+		filepath.Join(homeDir, configDirName),
+		filepath.Join(homeDir, ".config", "gcloud"),
 	}
 
 	for _, dir := range dirs {
@@ -87,13 +89,13 @@ func SeedTemplateDir(templateDir, templateName, harness, embedDir, configDirName
 		mode    os.FileMode
 	}{
 		{filepath.Join(templateDir, "scion-agent.json"), scionJSONStr, 0644},
-		{filepath.Join(templateDir, "scion_hook.py"), readEmbed("scion_hook.py"), 0644},
-		{filepath.Join(templateDir, "scion_tool.py"), readCommonEmbed("scion_tool.py"), 0644},
-		{filepath.Join(templateDir, "sciontool"), "#!/bin/bash\npython3 $HOME/scion_tool.py \"$@\"\n", 0755},
-		{filepath.Join(templateDir, configDirName, "settings.json"), readEmbed("settings.json"), 0644},
-		{filepath.Join(templateDir, configDirName, "system_prompt.md"), readEmbed("system_prompt.md"), 0644},
-		{filepath.Join(templateDir, configDirName, mdFile), readEmbed(mdFile), 0644},
-		{filepath.Join(templateDir, ".bashrc"), readEmbed("bashrc"), 0644},
+		{filepath.Join(homeDir, "scion_hook.py"), readEmbed("scion_hook.py"), 0644},
+		{filepath.Join(homeDir, "scion_tool.py"), readCommonEmbed("scion_tool.py"), 0644},
+		{filepath.Join(homeDir, "sciontool"), "#!/bin/bash\npython3 $HOME/scion_tool.py \"$@\"\n", 0755},
+		{filepath.Join(homeDir, configDirName, "settings.json"), readEmbed("settings.json"), 0644},
+		{filepath.Join(homeDir, configDirName, "system_prompt.md"), readEmbed("system_prompt.md"), 0644},
+		{filepath.Join(homeDir, configDirName, mdFile), readEmbed(mdFile), 0644},
+		{filepath.Join(homeDir, ".bashrc"), readEmbed("bashrc"), 0644},
 	}
 
 	if claudeJSON != "" {
@@ -101,7 +103,7 @@ func SeedTemplateDir(templateDir, templateName, harness, embedDir, configDirName
 			path    string
 			content string
 			mode    os.FileMode
-		}{filepath.Join(templateDir, ".claude.json"), claudeJSON, 0644})
+		}{filepath.Join(homeDir, ".claude.json"), claudeJSON, 0644})
 	}
 
 	for _, f := range files {

@@ -24,7 +24,7 @@ func (c *ClaudeCode) DiscoverAuth(agentHome string) api.AuthConfig {
 	}
 }
 
-func (c *ClaudeCode) GetEnv(agentName string, unixUsername string, auth api.AuthConfig) map[string]string {
+func (c *ClaudeCode) GetEnv(agentName string, agentHome string, unixUsername string, auth api.AuthConfig) map[string]string {
 	env := make(map[string]string)
 	if auth.AnthropicAPIKey != "" {
 		env["ANTHROPIC_API_KEY"] = auth.AnthropicAPIKey
@@ -51,7 +51,7 @@ func (c *ClaudeCode) DefaultConfigDir() string {
 	return ".claude"
 }
 
-func (c *ClaudeCode) HasSystemPrompt() bool {
+func (c *ClaudeCode) HasSystemPrompt(agentHome string) bool {
 	return true
 }
 
