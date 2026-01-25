@@ -14,11 +14,15 @@
         "outDir": "./dist",
         "rootDir": "./src",
         "lib": [
-            "ES2022"
+            "ES2022",
+            "DOM",
+            "DOM.Iterable"
         ],
         "types": [
             "node"
         ],
+        "experimentalDecorators": true,
+        "useDefineForClassFields": false,
         "noUnusedLocals": true,
         "noUnusedParameters": true,
         "noImplicitReturns": true,

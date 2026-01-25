@@ -1,0 +1,123 @@
+/**
+ * Lit SSR Renderer
+ *
+ * Renders Lit components server-side and wraps in HTML shell
+ */
+
+import { render } from '@lit-labs/ssr';
+import { html, type TemplateResult } from 'lit';
+import { collectResult } from '@lit-labs/ssr/lib/render-result.js';
+
+import type { PageData, User } from '../../shared/types.js';
+import { getHtmlTemplate, getPageTitle } from './templates.js';
+
+// Import components for server-side rendering
+// These must be imported so they're registered before rendering
+import '../../components/app-shell.js';
+import '../../components/pages/home.js';
+import '../../components/pages/not-found.js';
+
+export interface RenderContext {
+  /** Current URL path */
+  url: string;
+  /** Authenticated user (if any) */
+  user?: User | undefined;
+  /** Additional data to pass to the page */
+  data?: Record<string, unknown> | undefined;
+}
+
+/**
+ * Renders a page with the app shell and page content
+ */
+export async function renderPage(ctx: RenderContext): Promise<string> {
+  const { url, user, data } = ctx;
+  const pageTitle = getPageTitle(url);
+
+  // Create the initial page data for hydration
+  const initialData: PageData = {
+    path: url,
+    title: pageTitle,
+    user,
+    data,
+  };
+
+  // Determine which page to render based on URL
+  const pageContent = getPageTemplate(url, initialData);
+
+  // Render the full app shell with page content
+  const appTemplate = html`
+    <scion-app .user=${user} .currentPath=${url}> ${pageContent} </scion-app>
+  `;
+
+  // Collect the rendered HTML
+  const componentHtml = await collectResult(render(appTemplate));
+
+  // Wrap in HTML shell with hydration scripts
+  const fullHtml = getHtmlTemplate({
+    title: pageTitle,
+    content: componentHtml,
+    initialData,
+    scripts: ['/assets/main.js'],
+    styles: ['/assets/main.css'],
+  });
+
+  return fullHtml;
+}
+
+/**
+ * Renders just a page component (without the shell) for client-side navigation
+ */
+export async function renderPageContent(
+  url: string,
+  data?: Record<string, unknown>
+): Promise<string> {
+  const pageTitle = getPageTitle(url);
+  const pageData: PageData = {
+    path: url,
+    title: pageTitle,
+    data,
+  };
+
+  const pageContent = getPageTemplate(url, pageData);
+  return await collectResult(render(pageContent));
+}
+
+/**
+ * Gets the appropriate page template based on URL
+ */
+function getPageTemplate(url: string, pageData: PageData): TemplateResult {
+  // Route matching
+  if (url === '/' || url === '') {
+    return html`<scion-page-home .pageData=${pageData}></scion-page-home>`;
+  }
+
+  // Future routes will be added here as we implement more pages
+  // if (url === '/groves') {
+  //     return html`<scion-grove-list .pageData=${pageData}></scion-grove-list>`;
+  // }
+
+  // 404 for unmatched routes
+  return html`<scion-page-404 .pageData=${pageData}></scion-page-404>`;
+}
+
+/**
+ * Check if a URL should be handled by the SPA router
+ * (as opposed to static files or API routes)
+ */
+export function isSpaRoute(url: string): boolean {
+  // Skip static assets
+  if (url.startsWith('/assets/')) return false;
+  if (url.startsWith('/healthz')) return false;
+  if (url.startsWith('/readyz')) return false;
+  if (url.startsWith('/api/')) return false;
+  if (url.startsWith('/auth/')) return false;
+  if (url.startsWith('/events')) return false;
+
+  // Skip file extensions
+  const ext = url.split('.').pop();
+  if (ext && ['js', 'css', 'png', 'jpg', 'svg', 'ico', 'json', 'txt'].includes(ext)) {
+    return false;
+  }
+
+  return true;
+}

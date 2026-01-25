@@ -1,13 +1,146 @@
 /**
  * Client entry point
  *
- * This will be expanded in Milestone 2 with Lit SSR integration
+ * Handles hydration of SSR content and client-side routing
  */
 
-console.info('Scion Web Frontend client loaded');
+// @vaadin/router reserved for future use in client-side routing
+// import { Router } from '@vaadin/router';
 
-// Placeholder for client-side initialization
-// Will include:
-// - Hydration of SSR content
-// - Client-side router setup
-// - SSE connection
+import type { PageData } from '../shared/types.js';
+
+// Import all components for client-side hydration and routing
+import '../components/app-shell.js';
+import '../components/pages/home.js';
+import '../components/pages/not-found.js';
+
+/**
+ * Initialize the client-side application
+ */
+async function init(): Promise<void> {
+  console.info('[Scion] Initializing client...');
+
+  // Get initial data from SSR
+  const initialData = getInitialData();
+  if (initialData) {
+    console.info('[Scion] Initial page data:', initialData.path);
+  }
+
+  // Wait for custom elements to be defined
+  await Promise.all([
+    customElements.whenDefined('scion-app'),
+    customElements.whenDefined('scion-page-home'),
+    customElements.whenDefined('scion-page-404'),
+  ]);
+
+  console.info('[Scion] Components defined, setting up router...');
+
+  // Setup client-side router for navigation
+  setupRouter();
+
+  console.info('[Scion] Client initialization complete');
+}
+
+/**
+ * Retrieves initial page data from SSR-injected script tag
+ */
+function getInitialData(): PageData | null {
+  const script = document.getElementById('__SCION_DATA__');
+  if (!script) {
+    console.warn('[Scion] No initial data found');
+    return null;
+  }
+
+  try {
+    return JSON.parse(script.textContent || '{}') as PageData;
+  } catch (e) {
+    console.error('[Scion] Failed to parse initial data:', e);
+    return null;
+  }
+}
+
+/**
+ * Sets up the Vaadin Router for client-side navigation
+ */
+function setupRouter(): void {
+  // Find the content outlet within the app shell
+  const appShell = document.querySelector('scion-app');
+  if (!appShell) {
+    console.error('[Scion] App shell not found');
+    return;
+  }
+
+  // The router outlet is the content slot in the app shell
+  // For now, we handle navigation by updating the app shell's currentPath
+  // and letting the server re-render on full navigation
+
+  // Add click handlers for client-side navigation
+  document.addEventListener('click', (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const anchor = target.closest('a');
+
+    if (!anchor) return;
+
+    const href = anchor.getAttribute('href');
+    if (!href) return;
+
+    // Skip external links
+    if (href.startsWith('http') || href.startsWith('//')) return;
+
+    // Skip special links
+    if (href.startsWith('javascript:')) return;
+    if (href.startsWith('#')) return;
+
+    // Skip links that should trigger full page loads
+    if (href.startsWith('/api/')) return;
+    if (href.startsWith('/auth/')) return;
+    if (href.startsWith('/events')) return;
+
+    // Handle client-side navigation
+    e.preventDefault();
+    navigateTo(href);
+  });
+
+  // Handle browser back/forward
+  window.addEventListener('popstate', () => {
+    updateCurrentPath(window.location.pathname);
+  });
+}
+
+/**
+ * Navigates to a new path using the History API
+ */
+function navigateTo(path: string): void {
+  if (path === window.location.pathname) return;
+
+  window.history.pushState({}, '', path);
+  updateCurrentPath(path);
+
+  // For now, do a full page load to get SSR content
+  // In the future, we could fetch just the page content via AJAX
+  window.location.href = path;
+}
+
+/**
+ * Updates the app shell's current path
+ */
+function updateCurrentPath(path: string): void {
+  const appShell = document.querySelector('scion-app') as HTMLElement & {
+    currentPath?: string;
+  };
+  if (appShell) {
+    appShell.currentPath = path;
+  }
+}
+
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    void init();
+  });
+} else {
+  void init();
+}
+
+// Export for potential use in tests
+export { getInitialData, navigateTo };

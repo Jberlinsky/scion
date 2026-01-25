@@ -1,0 +1,14 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "outDir": "./dist/client",
+        "rootDir": "./src",
+        "module": "ESNext",
+        "moduleResolution": "bundler"
+    },
+    "include": [
+        "src/client/**/*",
+        "src/components/**/*",
+        "src/shared/**/*"
+    ]
+}

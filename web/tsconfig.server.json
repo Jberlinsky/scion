@@ -2,9 +2,11 @@
     "extends": "./tsconfig.json",
     "compilerOptions": {
         "outDir": "./dist/server",
-        "rootDir": "./src/server"
+        "rootDir": "./src"
     },
     "include": [
-        "src/server/**/*"
+        "src/server/**/*",
+        "src/components/**/*",
+        "src/shared/**/*"
     ]
 }

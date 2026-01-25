@@ -1,0 +1,154 @@
+/**
+ * Page routes for SSR
+ *
+ * Handles rendering of all SPA pages server-side
+ */
+
+import Router from '@koa/router';
+import type { Context } from 'koa';
+
+import { renderPage, isSpaRoute } from '../ssr/index.js';
+
+const router = new Router();
+
+/**
+ * Catch-all route for SPA pages
+ *
+ * Renders pages server-side using Lit SSR
+ */
+router.get('(.*)', async (ctx: Context) => {
+  const url = ctx.path;
+
+  // Skip non-SPA routes (handled by other middleware)
+  if (!isSpaRoute(url)) {
+    return;
+  }
+
+  try {
+    // Render the page server-side
+    // User will be set by auth middleware in future
+    const user = ctx.state.user as import('../../shared/types.js').User | undefined;
+    const html = await renderPage({
+      url,
+      user,
+      data: {}, // Additional data can be fetched here
+    });
+
+    // Set 404 status for not-found pages
+    if (url !== '/' && !isKnownRoute(url)) {
+      ctx.status = 404;
+    } else {
+      ctx.status = 200;
+    }
+
+    ctx.type = 'text/html';
+    ctx.body = html;
+  } catch (error) {
+    console.error('SSR rendering error:', error);
+
+    // Fallback to error page
+    ctx.status = 500;
+    ctx.type = 'text/html';
+    ctx.body = getErrorHtml(error);
+  }
+});
+
+/**
+ * Check if a URL matches a known route
+ */
+function isKnownRoute(url: string): boolean {
+  const knownRoutes = ['/', '/groves', '/agents', '/settings'];
+
+  // Exact match
+  if (knownRoutes.includes(url)) {
+    return true;
+  }
+
+  // Pattern matches for dynamic routes
+  const patterns = [
+    /^\/groves\/[^/]+$/,
+    /^\/groves\/[^/]+\/agents$/,
+    /^\/agents\/[^/]+$/,
+    /^\/agents\/[^/]+\/terminal$/,
+  ];
+
+  return patterns.some((pattern) => pattern.test(url));
+}
+
+/**
+ * Generate error HTML for server errors
+ */
+function getErrorHtml(error: unknown): string {
+  const message = error instanceof Error ? error.message : 'Unknown error';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Error - Scion</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #f8fafc;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+        }
+        .code {
+            font-size: 6rem;
+            font-weight: 800;
+            color: #ef4444;
+            margin-bottom: 1rem;
+        }
+        h1 {
+            font-size: 1.5rem;
+            color: #1e293b;
+            margin-bottom: 0.5rem;
+        }
+        p {
+            color: #64748b;
+        }
+        pre {
+            background: #1e293b;
+            color: #f8fafc;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            text-align: left;
+            overflow-x: auto;
+            max-width: 600px;
+            margin: 1rem auto;
+        }
+        a {
+            display: inline-block;
+            margin-top: 1rem;
+            padding: 0.75rem 1.5rem;
+            background: #3b82f6;
+            color: white;
+            text-decoration: none;
+            border-radius: 0.5rem;
+        }
+        a:hover {
+            background: #2563eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="code">500</div>
+        <h1>Server Error</h1>
+        <p>Something went wrong while rendering this page.</p>
+        ${process.env.NODE_ENV !== 'production' ? `<pre>${message}</pre>` : ''}
+        <a href="/">Back to Dashboard</a>
+    </div>
+</body>
+</html>`;
+}
+
+export const pageRoutes = router;

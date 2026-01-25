@@ -12,12 +12,16 @@ export default defineConfig({
                 main: resolve(__dirname, 'src/client/main.ts'),
             },
             output: {
-                entryFileNames: 'assets/[name].[hash].js',
-                chunkFileNames: 'assets/[name].[hash].js',
-                assetFileNames: 'assets/[name].[hash].[ext]',
+                // Use consistent naming for SSR compatibility
+                entryFileNames: 'assets/[name].js',
+                chunkFileNames: 'assets/[name]-[hash].js',
+                assetFileNames: 'assets/[name]-[hash].[ext]',
             },
         },
         sourcemap: true,
+        // Ensure Lit components are properly bundled
+        target: 'esnext',
+        minify: 'esbuild',
     },
     server: {
         port: 3000,
@@ -27,5 +31,13 @@ export default defineConfig({
         alias: {
             '@': resolve(__dirname, 'src'),
         },
+    },
+    // Ensure decorators work correctly
+    esbuild: {
+        target: 'esnext',
+    },
+    // Optimize Lit dependency
+    optimizeDeps: {
+        include: ['lit', '@vaadin/router'],
     },
 });
