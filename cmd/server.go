@@ -285,14 +285,14 @@ func registerGlobalGroveAndHost(ctx context.Context, s store.Store, hostID, host
 		return fmt.Errorf("failed to check for global grove: %w", err)
 	}
 
-	// Create global grove if it doesn't exist
+	// Create global grove if it doesn't exist (without DefaultRuntimeHostID yet)
+	groveNeedsDefaultHost := false
 	if globalGrove == nil {
 		globalGrove = &store.Grove{
-			ID:                   api.NewUUID(),
-			Name:                 "Global",
-			Slug:                 GlobalGroveName,
-			Visibility:           store.VisibilityPrivate,
-			DefaultRuntimeHostID: hostID, // Set this host as the default
+			ID:         api.NewUUID(),
+			Name:       "Global",
+			Slug:       GlobalGroveName,
+			Visibility: store.VisibilityPrivate,
 			Labels: map[string]string{
 				"scion.io/system": "true",
 				"scion.io/global": "true",
@@ -302,15 +302,12 @@ func registerGlobalGroveAndHost(ctx context.Context, s store.Store, hostID, host
 		if err := s.CreateGrove(ctx, globalGrove); err != nil {
 			return fmt.Errorf("failed to create global grove: %w", err)
 		}
+		groveNeedsDefaultHost = true
 	} else if globalGrove.DefaultRuntimeHostID == "" {
-		// Update existing grove to set default runtime host if not already set
-		globalGrove.DefaultRuntimeHostID = hostID
-		if err := s.UpdateGrove(ctx, globalGrove); err != nil {
-			log.Printf("Warning: failed to set default runtime host for global grove: %v", err)
-		}
+		groveNeedsDefaultHost = true
 	}
 
-	// Create or update the runtime host record
+	// Create or update the runtime host record (must happen before setting as default)
 	runtimeType := "docker"
 	if rt != nil {
 		runtimeType = rt.Name()
@@ -352,6 +349,14 @@ func registerGlobalGroveAndHost(ctx context.Context, s store.Store, hostID, host
 		host.LastHeartbeat = time.Now()
 		if err := s.UpdateRuntimeHost(ctx, host); err != nil {
 			return fmt.Errorf("failed to update runtime host: %w", err)
+		}
+	}
+
+	// Now that the runtime host exists, set it as the default for the grove
+	if groveNeedsDefaultHost {
+		globalGrove.DefaultRuntimeHostID = hostID
+		if err := s.UpdateGrove(ctx, globalGrove); err != nil {
+			log.Printf("Warning: failed to set default runtime host for global grove: %v", err)
 		}
 	}
 
