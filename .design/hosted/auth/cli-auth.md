@@ -316,8 +316,10 @@ func Load(hubURL string) (*HubCredentials, error) {
     return hubCreds, nil
 }
 ```
+# Future work
 
-## Headless Authentication
+## Headless Authentication (postponed)
+
 
 For systems without a browser (CI/CD, remote servers), support API key authentication:
 
