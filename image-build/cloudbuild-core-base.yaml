@@ -1,6 +1,9 @@
 # Cloud Build configuration for building just the core-base image
 # This is the foundation layer with Go, Git, unix tools, and GCS fuse
 # Use this when you only need to update the core foundation tools
+#
+# Note: Build and push are split into separate steps to avoid OAuth token
+# expiration during long builds. The push step gets a fresh token.
 steps:
   # Enable multi-arch builds
   - name: 'gcr.io/cloud-builders/docker'
@@ -15,7 +18,7 @@ steps:
     env:
       - 'DOCKER_CLI_EXPERIMENTAL=enabled'
 
-  # Build and push core-base image
+  # Build core-base image and cache locally (no push yet)
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-core-base'
     dir: 'image-build/core-base'
@@ -24,6 +27,29 @@ steps:
       - 'build'
       - '--platform'
       - 'linux/amd64,linux/arm64'
+      - '--cache-to'
+      - 'type=local,dest=/workspace/buildx-cache,mode=max'
+      - '-t'
+      - '$_REGISTRY/core-base:$SHORT_SHA'
+      - '-t'
+      - '$_REGISTRY/core-base:latest'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+    env:
+      - 'DOCKER_CLI_EXPERIMENTAL=enabled'
+
+  # Push core-base image (gets fresh OAuth token, uses cached layers)
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-core-base'
+    dir: 'image-build/core-base'
+    args:
+      - 'buildx'
+      - 'build'
+      - '--platform'
+      - 'linux/amd64,linux/arm64'
+      - '--cache-from'
+      - 'type=local,src=/workspace/buildx-cache'
       - '-t'
       - '$_REGISTRY/core-base:$SHORT_SHA'
       - '-t'

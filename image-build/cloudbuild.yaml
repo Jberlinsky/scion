@@ -1,6 +1,9 @@
 # Cloud Build configuration for building ALL images (full rebuild)
 # This builds core-base -> scion-base -> all harnesses
 # Use this for complete rebuilds or when you need everything updated
+#
+# Note: Long-building images (core-base) have build/push split into separate
+# steps to avoid OAuth token expiration. The push step gets a fresh token.
 steps:
   # Enable multi-arch builds
   - name: 'gcr.io/cloud-builders/docker'
@@ -15,7 +18,7 @@ steps:
     env:
       - 'DOCKER_CLI_EXPERIMENTAL=enabled'
 
-  # 1. Build Core Base Image (foundation tools - Go, Git, unix tools, GCS fuse)
+  # 1a. Build Core Base Image and cache locally (no push yet)
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-core-base'
     dir: 'image-build/core-base'
@@ -24,6 +27,29 @@ steps:
       - 'build'
       - '--platform'
       - 'linux/amd64,linux/arm64'
+      - '--cache-to'
+      - 'type=local,dest=/workspace/buildx-cache-core,mode=max'
+      - '-t'
+      - '$_REGISTRY/core-base:$SHORT_SHA'
+      - '-t'
+      - '$_REGISTRY/core-base:latest'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+    env:
+      - 'DOCKER_CLI_EXPERIMENTAL=enabled'
+
+  # 1b. Push Core Base Image (gets fresh OAuth token, uses cached layers)
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-core-base'
+    dir: 'image-build/core-base'
+    args:
+      - 'buildx'
+      - 'build'
+      - '--platform'
+      - 'linux/amd64,linux/arm64'
+      - '--cache-from'
+      - 'type=local,src=/workspace/buildx-cache-core'
       - '-t'
       - '$_REGISTRY/core-base:$SHORT_SHA'
       - '-t'
