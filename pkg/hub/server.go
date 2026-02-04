@@ -2,6 +2,8 @@ package hub
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -12,6 +14,13 @@ import (
 
 	"github.com/ptone/scion-agent/pkg/storage"
 	"github.com/ptone/scion-agent/pkg/store"
+)
+
+const (
+	// SecretKeyAgentSigningKey is the secret key for the agent token signing key.
+	SecretKeyAgentSigningKey = "agent_signing_key"
+	// SecretKeyUserSigningKey is the secret key for the user token signing key.
+	SecretKeyUserSigningKey = "user_signing_key"
 )
 
 // ServerConfig holds configuration for the Hub API server.
@@ -200,7 +209,13 @@ func New(cfg ServerConfig, s store.Store) *Server {
 		startTime: time.Now(),
 	}
 
+	ctx := context.Background()
+
 	// Initialize agent token service
+	agentKey, err := srv.ensureSigningKey(ctx, SecretKeyAgentSigningKey, cfg.AgentTokenConfig.SigningKey)
+	if err == nil {
+		cfg.AgentTokenConfig.SigningKey = agentKey
+	}
 	tokenService, err := NewAgentTokenService(cfg.AgentTokenConfig)
 	if err != nil {
 		log.Printf("[Hub] Warning: failed to initialize agent token service: %v", err)
@@ -209,6 +224,10 @@ func New(cfg ServerConfig, s store.Store) *Server {
 	}
 
 	// Initialize user token service
+	userKey, err := srv.ensureSigningKey(ctx, SecretKeyUserSigningKey, cfg.UserTokenConfig.SigningKey)
+	if err == nil {
+		cfg.UserTokenConfig.SigningKey = userKey
+	}
 	userTokenService, err := NewUserTokenService(cfg.UserTokenConfig)
 	if err != nil {
 		log.Printf("[Hub] Warning: failed to initialize user token service: %v", err)
@@ -262,6 +281,51 @@ func New(cfg ServerConfig, s store.Store) *Server {
 	srv.registerRoutes()
 
 	return srv
+}
+
+// ensureSigningKey ensures a signing key exists in the store, loading it if it does
+// or generating and saving it if it doesn't.
+// TODO: This should ultimately be replaced with a proper secret management backing service.
+func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingKey []byte) ([]byte, error) {
+	if len(existingKey) > 0 {
+		return existingKey, nil
+	}
+
+	// Try to load from store
+	val, err := s.store.GetSecretValue(ctx, keyName, store.ScopeHub, "hub")
+	if err == nil {
+		log.Printf("[Hub] Loaded existing signing key from store: %s", keyName)
+		return base64.StdEncoding.DecodeString(val)
+	}
+
+	if err != store.ErrNotFound {
+		return nil, fmt.Errorf("failed to load signing key %s from store: %w", keyName, err)
+	}
+
+	// Not found, generate a new one
+	newKey := make([]byte, 32)
+	if _, err := rand.Read(newKey); err != nil {
+		return nil, fmt.Errorf("failed to generate random signing key: %w", err)
+	}
+
+	// Save to store
+	secret := &store.Secret{
+		ID:             fmt.Sprintf("hub-%s", keyName),
+		Key:            keyName,
+		EncryptedValue: base64.StdEncoding.EncodeToString(newKey),
+		Scope:          store.ScopeHub,
+		ScopeID:        "hub",
+		Description:    fmt.Sprintf("Hub signing key for %s", keyName),
+	}
+
+	if _, err := s.store.UpsertSecret(ctx, secret); err != nil {
+		// Log warning but continue - we will have a random key for this session
+		log.Printf("[Hub] Warning: failed to persist signing key %s: %v", keyName, err)
+	} else {
+		log.Printf("[Hub] Persisted new signing key: %s", keyName)
+	}
+
+	return newKey, nil
 }
 
 // SetDispatcher sets the agent dispatcher for co-located runtime host operations.

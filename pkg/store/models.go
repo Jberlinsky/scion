@@ -426,6 +426,7 @@ type Secret struct {
 
 // Scope constants for environment variables and secrets.
 const (
+	ScopeHub         = "hub"
 	ScopeUser        = "user"
 	ScopeGrove       = "grove"
 	ScopeRuntimeHost = "runtime_host"
