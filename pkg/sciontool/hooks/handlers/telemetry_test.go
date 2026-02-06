@@ -13,6 +13,8 @@ import (
 	"github.com/ptone/scion-agent/pkg/sciontool/telemetry"
 	otellog "go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 func TestNewTelemetryHandler(t *testing.T) {
@@ -341,5 +343,183 @@ func TestTelemetryHandler_LogRedaction(t *testing.T) {
 	}
 	if found["session_id"] == "" {
 		t.Error("session_id should be present as hashed value")
+	}
+}
+
+func TestNewTelemetryHandler_WithMeterProvider(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer mp.Shutdown(context.Background())
+
+	h := NewTelemetryHandler(nil, nil, nil, mp)
+	if h == nil {
+		t.Fatal("NewTelemetryHandler should not return nil")
+	}
+	if h.tokensInput == nil {
+		t.Error("tokensInput instrument should be initialized")
+	}
+	if h.tokensOutput == nil {
+		t.Error("tokensOutput instrument should be initialized")
+	}
+	if h.tokensCached == nil {
+		t.Error("tokensCached instrument should be initialized")
+	}
+	if h.toolCalls == nil {
+		t.Error("toolCalls instrument should be initialized")
+	}
+	if h.toolDuration == nil {
+		t.Error("toolDuration instrument should be initialized")
+	}
+	if h.sessionCount == nil {
+		t.Error("sessionCount instrument should be initialized")
+	}
+	if h.apiCalls == nil {
+		t.Error("apiCalls instrument should be initialized")
+	}
+	if h.apiDuration == nil {
+		t.Error("apiDuration instrument should be initialized")
+	}
+}
+
+func TestTelemetryHandler_NilMeterProviderNoInstruments(t *testing.T) {
+	h := NewTelemetryHandler(nil, nil, nil)
+	if h.tokensInput != nil {
+		t.Error("tokensInput should be nil without MeterProvider")
+	}
+	if h.toolCalls != nil {
+		t.Error("toolCalls should be nil without MeterProvider")
+	}
+}
+
+func TestTelemetryHandler_ToolMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer mp.Shutdown(context.Background())
+
+	h := NewTelemetryHandler(nil, nil, nil, mp)
+
+	// tool-start
+	if err := h.Handle(&hooks.Event{
+		Name: hooks.EventToolStart,
+		Data: hooks.EventData{ToolName: "Bash", ToolInput: "ls"},
+	}); err != nil {
+		t.Fatalf("Handle tool-start error: %v", err)
+	}
+
+	// tool-end
+	if err := h.Handle(&hooks.Event{
+		Name: hooks.EventToolEnd,
+		Data: hooks.EventData{ToolName: "Bash", ToolOutput: "ok", Success: true},
+	}); err != nil {
+		t.Fatalf("Handle tool-end error: %v", err)
+	}
+
+	// Collect metrics
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect error: %v", err)
+	}
+
+	foundToolCalls := false
+	foundToolDuration := false
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			switch m.Name {
+			case "agent.tool.calls":
+				foundToolCalls = true
+			case "agent.tool.duration":
+				foundToolDuration = true
+			}
+		}
+	}
+
+	if !foundToolCalls {
+		t.Error("expected agent.tool.calls metric to be recorded")
+	}
+	if !foundToolDuration {
+		t.Error("expected agent.tool.duration metric to be recorded")
+	}
+}
+
+func TestTelemetryHandler_ModelMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer mp.Shutdown(context.Background())
+
+	h := NewTelemetryHandler(nil, nil, nil, mp)
+
+	// model-start
+	if err := h.Handle(&hooks.Event{
+		Name: hooks.EventModelStart,
+		Data: hooks.EventData{},
+	}); err != nil {
+		t.Fatalf("Handle model-start error: %v", err)
+	}
+
+	// model-end
+	if err := h.Handle(&hooks.Event{
+		Name: hooks.EventModelEnd,
+		Data: hooks.EventData{Success: true},
+	}); err != nil {
+		t.Fatalf("Handle model-end error: %v", err)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect error: %v", err)
+	}
+
+	foundAPICalls := false
+	foundAPIDuration := false
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			switch m.Name {
+			case "gen_ai.api.calls":
+				foundAPICalls = true
+			case "gen_ai.api.duration":
+				foundAPIDuration = true
+			}
+		}
+	}
+
+	if !foundAPICalls {
+		t.Error("expected gen_ai.api.calls metric to be recorded")
+	}
+	if !foundAPIDuration {
+		t.Error("expected gen_ai.api.duration metric to be recorded")
+	}
+}
+
+func TestTelemetryHandler_SessionMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer mp.Shutdown(context.Background())
+
+	h := NewTelemetryHandler(nil, nil, nil, mp)
+
+	// session-end (without session files, token metrics will be skipped but session count should work)
+	if err := h.Handle(&hooks.Event{
+		Name: hooks.EventSessionEnd,
+		Data: hooks.EventData{Reason: "user_exit"},
+	}); err != nil {
+		t.Fatalf("Handle session-end error: %v", err)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect error: %v", err)
+	}
+
+	foundSessionCount := false
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == "agent.session.count" {
+				foundSessionCount = true
+			}
+		}
+	}
+
+	if !foundSessionCount {
+		t.Error("expected agent.session.count metric to be recorded")
 	}
 }

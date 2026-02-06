@@ -22,6 +22,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/sciontool/supervisor"
 	"github.com/ptone/scion-agent/pkg/sciontool/telemetry"
 	otellog "go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -145,11 +146,15 @@ func runInit(args []string) int {
 
 		var tp trace.TracerProvider
 		var lp otellog.LoggerProvider
+		var mp metric.MeterProvider
 		if lifecycleProviders != nil {
 			tp = lifecycleProviders.TracerProvider
 			lp = lifecycleProviders.LoggerProvider
+			if lifecycleProviders.MeterProvider != nil {
+				mp = lifecycleProviders.MeterProvider
+			}
 		}
-		telemetryHandler = handlers.NewTelemetryHandler(tp, lp, redactor)
+		telemetryHandler = handlers.NewTelemetryHandler(tp, lp, redactor, mp)
 		log.Info("Telemetry handler initialized for hook-to-span conversion")
 
 		// Register telemetry handler for lifecycle events

@@ -7,6 +7,7 @@ package handlers
 import (
 	"context"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	otellog "go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -47,19 +49,31 @@ type inProgressSpan struct {
 	toolName  string
 }
 
-// TelemetryHandler converts hook events to OTLP spans and emits correlated log records.
+// TelemetryHandler converts hook events to OTLP spans, emits correlated log records,
+// and records OTel metrics for token usage, tool calls, and API performance.
 type TelemetryHandler struct {
 	tracer     trace.Tracer
 	logger     *slog.Logger
 	redactor   *telemetry.Redactor
 	spanStore  sync.Map // map[string]*inProgressSpan - keyed by spanKey
 	sessionDir string   // directory for session files (empty = default)
+
+	// Metric instruments
+	tokensInput    metric.Int64Counter
+	tokensOutput   metric.Int64Counter
+	tokensCached   metric.Int64Counter
+	toolCalls      metric.Int64Counter
+	toolDuration   metric.Float64Histogram
+	sessionCount   metric.Int64Counter
+	apiCalls       metric.Int64Counter
+	apiDuration    metric.Float64Histogram
 }
 
 // NewTelemetryHandler creates a new telemetry handler.
 // If tp is nil, a noop tracer will be used.
 // If lp is non-nil, correlated log records will be emitted alongside spans.
-func NewTelemetryHandler(tp trace.TracerProvider, lp otellog.LoggerProvider, redactor *telemetry.Redactor) *TelemetryHandler {
+// If mp is non-nil, OTel metric instruments will be created for recording counters and histograms.
+func NewTelemetryHandler(tp trace.TracerProvider, lp otellog.LoggerProvider, redactor *telemetry.Redactor, mp ...metric.MeterProvider) *TelemetryHandler {
 	var tracer trace.Tracer
 	if tp != nil {
 		tracer = tp.Tracer("github.com/ptone/scion-agent/pkg/sciontool/hooks/handlers")
@@ -78,7 +92,83 @@ func NewTelemetryHandler(tp trace.TracerProvider, lp otellog.LoggerProvider, red
 		))
 	}
 
+	// Initialize metric instruments if a MeterProvider is given
+	if len(mp) > 0 && mp[0] != nil {
+		h.initMetrics(mp[0])
+	}
+
 	return h
+}
+
+// initMetrics creates OTel metric instruments on the handler.
+func (h *TelemetryHandler) initMetrics(mp metric.MeterProvider) {
+	meter := mp.Meter("github.com/ptone/scion-agent/pkg/sciontool/hooks/handlers")
+
+	var err error
+
+	h.tokensInput, err = meter.Int64Counter("gen_ai.tokens.input",
+		metric.WithUnit("{token}"),
+		metric.WithDescription("Number of input tokens consumed"),
+	)
+	if err != nil {
+		log.Error("Failed to create gen_ai.tokens.input counter: %v", err)
+	}
+
+	h.tokensOutput, err = meter.Int64Counter("gen_ai.tokens.output",
+		metric.WithUnit("{token}"),
+		metric.WithDescription("Number of output tokens generated"),
+	)
+	if err != nil {
+		log.Error("Failed to create gen_ai.tokens.output counter: %v", err)
+	}
+
+	h.tokensCached, err = meter.Int64Counter("gen_ai.tokens.cached",
+		metric.WithUnit("{token}"),
+		metric.WithDescription("Number of tokens served from cache"),
+	)
+	if err != nil {
+		log.Error("Failed to create gen_ai.tokens.cached counter: %v", err)
+	}
+
+	h.toolCalls, err = meter.Int64Counter("agent.tool.calls",
+		metric.WithUnit("{call}"),
+		metric.WithDescription("Number of tool invocations"),
+	)
+	if err != nil {
+		log.Error("Failed to create agent.tool.calls counter: %v", err)
+	}
+
+	h.toolDuration, err = meter.Float64Histogram("agent.tool.duration",
+		metric.WithUnit("ms"),
+		metric.WithDescription("Duration of tool invocations"),
+	)
+	if err != nil {
+		log.Error("Failed to create agent.tool.duration histogram: %v", err)
+	}
+
+	h.sessionCount, err = meter.Int64Counter("agent.session.count",
+		metric.WithUnit("{session}"),
+		metric.WithDescription("Number of agent sessions"),
+	)
+	if err != nil {
+		log.Error("Failed to create agent.session.count counter: %v", err)
+	}
+
+	h.apiCalls, err = meter.Int64Counter("gen_ai.api.calls",
+		metric.WithUnit("{call}"),
+		metric.WithDescription("Number of LLM API calls"),
+	)
+	if err != nil {
+		log.Error("Failed to create gen_ai.api.calls counter: %v", err)
+	}
+
+	h.apiDuration, err = meter.Float64Histogram("gen_ai.api.duration",
+		metric.WithUnit("ms"),
+		metric.WithDescription("Duration of LLM API calls"),
+	)
+	if err != nil {
+		log.Error("Failed to create gen_ai.api.duration histogram: %v", err)
+	}
 }
 
 // Handle processes a hook event and emits a corresponding span.
@@ -167,6 +257,9 @@ func (h *TelemetryHandler) endSpan(event *hooks.Event, spanName, startEventType 
 
 	h.emitLogRecord(inProgress.ctx, event, spanName)
 	inProgress.span.End()
+
+	// Record metrics for end events
+	h.recordEndMetrics(event, startEventType, inProgress)
 }
 
 // singleSpan creates and immediately ends a span.
@@ -174,10 +267,11 @@ func (h *TelemetryHandler) singleSpan(event *hooks.Event, spanName string) {
 	ctx := context.Background()
 	attrs := h.eventToAttributes(event)
 
-	// For session-end events, try to add session metrics
+	// For session-end events, try to add session metrics and record metric counters
 	if event.Name == hooks.EventSessionEnd {
 		sessionAttrs := h.getSessionMetricsAttributes()
 		attrs = append(attrs, sessionAttrs...)
+		h.recordSessionMetrics(event)
 	}
 
 	ctx, span := h.tracer.Start(ctx, spanName, trace.WithAttributes(attrs...))
@@ -383,6 +477,105 @@ func (h *TelemetryHandler) eventToEndAttributes(event *hooks.Event, startTime ti
 	}
 
 	return attrs
+}
+
+// metricAttrs returns common OTel metric attributes derived from environment.
+func (h *TelemetryHandler) metricAttrs() []attribute.KeyValue {
+	var attrs []attribute.KeyValue
+	if v := os.Getenv("SCION_AGENT_ID"); v != "" {
+		attrs = append(attrs, attribute.String("agent_id", v))
+	}
+	if v := os.Getenv("SCION_HARNESS"); v != "" {
+		attrs = append(attrs, attribute.String("harness", v))
+	}
+	return attrs
+}
+
+// recordEndMetrics records metrics when a paired end event completes.
+func (h *TelemetryHandler) recordEndMetrics(event *hooks.Event, startEventType string, inProgress *inProgressSpan) {
+	ctx := context.Background()
+	durationMs := float64(time.Since(inProgress.startTime).Milliseconds())
+	baseAttrs := h.metricAttrs()
+
+	switch startEventType {
+	case hooks.EventToolStart:
+		if h.toolCalls != nil {
+			status := "success"
+			if event.Data.Error != "" {
+				status = "error"
+			}
+			attrs := append(baseAttrs,
+				attribute.String("tool_name", event.Data.ToolName),
+				attribute.String("status", status),
+			)
+			h.toolCalls.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		if h.toolDuration != nil {
+			attrs := append(baseAttrs,
+				attribute.String("tool_name", event.Data.ToolName),
+			)
+			h.toolDuration.Record(ctx, durationMs, metric.WithAttributes(attrs...))
+		}
+
+	case hooks.EventModelStart:
+		if h.apiCalls != nil {
+			status := "success"
+			if event.Data.Error != "" {
+				status = "error"
+			}
+			attrs := baseAttrs
+			if model := os.Getenv("SCION_MODEL"); model != "" {
+				attrs = append(attrs, attribute.String("model", model))
+			}
+			attrs = append(attrs, attribute.String("status", status))
+			h.apiCalls.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		if h.apiDuration != nil {
+			attrs := baseAttrs
+			if model := os.Getenv("SCION_MODEL"); model != "" {
+				attrs = append(attrs, attribute.String("model", model))
+			}
+			h.apiDuration.Record(ctx, durationMs, metric.WithAttributes(attrs...))
+		}
+	}
+}
+
+// recordSessionMetrics records token usage and session counters on session end.
+func (h *TelemetryHandler) recordSessionMetrics(event *hooks.Event) {
+	ctx := context.Background()
+	baseAttrs := h.metricAttrs()
+
+	// Record session count
+	if h.sessionCount != nil {
+		status := "completed"
+		if event.Data.Error != "" {
+			status = "error"
+		}
+		attrs := append(baseAttrs, attribute.String("status", status))
+		h.sessionCount.Add(ctx, 1, metric.WithAttributes(attrs...))
+	}
+
+	// Parse session file for token metrics
+	metrics, err := session.ParseLatestSession(h.sessionDir)
+	if err != nil {
+		log.Debug("Skipping token metrics - no session data: %v", err)
+		return
+	}
+
+	attrs := baseAttrs
+	if metrics.Model != "" {
+		attrs = append(attrs, attribute.String("model", metrics.Model))
+	}
+
+	if h.tokensInput != nil && metrics.TokensInput > 0 {
+		h.tokensInput.Add(ctx, int64(metrics.TokensInput), metric.WithAttributes(attrs...))
+	}
+	if h.tokensOutput != nil && metrics.TokensOutput > 0 {
+		h.tokensOutput.Add(ctx, int64(metrics.TokensOutput), metric.WithAttributes(attrs...))
+	}
+	if h.tokensCached != nil && metrics.TokensCached > 0 {
+		h.tokensCached.Add(ctx, int64(metrics.TokensCached), metric.WithAttributes(attrs...))
+	}
 }
 
 // Flush ends any in-progress spans. Called during shutdown.

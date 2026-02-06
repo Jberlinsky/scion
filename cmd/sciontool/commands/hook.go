@@ -20,6 +20,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/sciontool/log"
 	"github.com/ptone/scion-agent/pkg/sciontool/telemetry"
 	otellog "go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -212,12 +213,16 @@ func processHookData(data []byte) error {
 
 		var tp trace.TracerProvider
 		var lp otellog.LoggerProvider
+		var mp metric.MeterProvider
 		if providers != nil {
 			tp = providers.TracerProvider
 			lp = providers.LoggerProvider
+			if providers.MeterProvider != nil {
+				mp = providers.MeterProvider
+			}
 		}
 
-		telemetryHandler := handlers.NewTelemetryHandler(tp, lp, redactor)
+		telemetryHandler := handlers.NewTelemetryHandler(tp, lp, redactor, mp)
 		processor.AddHandler(telemetryHandler.Handle)
 	}
 

@@ -11,18 +11,21 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/log"
+	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
-// Providers holds SDK TracerProvider and LoggerProvider for OTel export.
-// Both providers share the same OTLP endpoint and resource attributes.
+// Providers holds SDK TracerProvider, LoggerProvider, and MeterProvider for OTel export.
+// All providers share the same OTLP endpoint and resource attributes.
 type Providers struct {
 	TracerProvider *trace.TracerProvider
 	LoggerProvider *log.LoggerProvider
+	MeterProvider  *metric.MeterProvider
 }
 
 // NewProviders creates real SDK TracerProvider and LoggerProvider that export
@@ -80,9 +83,25 @@ func NewProviders(ctx context.Context, config *Config, batch bool) (*Providers, 
 		return nil, fmt.Errorf("creating log exporter: %w", err)
 	}
 
+	// Create metric exporter (gRPC)
+	metricOpts := []otlpmetricgrpc.Option{
+		otlpmetricgrpc.WithEndpoint(config.Endpoint),
+	}
+	if config.Insecure {
+		metricOpts = append(metricOpts, otlpmetricgrpc.WithInsecure())
+	}
+	metricExporter, err := otlpmetricgrpc.New(ctx, metricOpts...)
+	if err != nil {
+		// Clean up previous exporters on failure
+		_ = traceExporter.Shutdown(ctx)
+		_ = logExporter.Shutdown(ctx)
+		return nil, fmt.Errorf("creating metric exporter: %w", err)
+	}
+
 	// Build providers with appropriate processor mode
 	var tp *trace.TracerProvider
 	var lp *log.LoggerProvider
+	var mp *metric.MeterProvider
 	if batch {
 		tp = trace.NewTracerProvider(
 			trace.WithResource(res),
@@ -91,6 +110,10 @@ func NewProviders(ctx context.Context, config *Config, batch bool) (*Providers, 
 		lp = log.NewLoggerProvider(
 			log.WithResource(res),
 			log.WithProcessor(log.NewBatchProcessor(logExporter)),
+		)
+		mp = metric.NewMeterProvider(
+			metric.WithResource(res),
+			metric.WithReader(metric.NewPeriodicReader(metricExporter)),
 		)
 	} else {
 		tp = trace.NewTracerProvider(
@@ -101,11 +124,16 @@ func NewProviders(ctx context.Context, config *Config, batch bool) (*Providers, 
 			log.WithResource(res),
 			log.WithProcessor(log.NewSimpleProcessor(logExporter)),
 		)
+		mp = metric.NewMeterProvider(
+			metric.WithResource(res),
+			metric.WithReader(metric.NewPeriodicReader(metricExporter)),
+		)
 	}
 
 	return &Providers{
 		TracerProvider: tp,
 		LoggerProvider: lp,
+		MeterProvider:  mp,
 	}, nil
 }
 
@@ -123,6 +151,11 @@ func (p *Providers) Shutdown(ctx context.Context) error {
 	}
 	if p.LoggerProvider != nil {
 		if err := p.LoggerProvider.Shutdown(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if p.MeterProvider != nil {
+		if err := p.MeterProvider.Shutdown(ctx); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

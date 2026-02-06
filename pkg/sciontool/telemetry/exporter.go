@@ -12,17 +12,20 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/sdk/trace"
+	colmetricpb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	metricpb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// CloudExporter exports traces to a cloud OTLP endpoint.
+// CloudExporter exports traces and metrics to a cloud OTLP endpoint.
 type CloudExporter struct {
 	traceExporter trace.SpanExporter
 	grpcClient    coltracepb.TraceServiceClient
+	metricClient  colmetricpb.MetricsServiceClient
 	grpcConn      *grpc.ClientConn
 	protocol      string
 	endpoint      string
@@ -90,6 +93,7 @@ func (e *CloudExporter) initGRPC(config *Config) error {
 
 	e.grpcConn = conn
 	e.grpcClient = coltracepb.NewTraceServiceClient(conn)
+	e.metricClient = colmetricpb.NewMetricsServiceClient(conn)
 
 	return nil
 }
@@ -139,6 +143,24 @@ func (e *CloudExporter) ExportProtoSpans(ctx context.Context, resourceSpans []*t
 
 	// Otherwise we can't forward raw proto data
 	// This is acceptable for M1 - cloud export may not work without proper setup
+	return nil
+}
+
+// ExportProtoMetrics exports raw proto metrics to the cloud endpoint.
+// This is used for forwarding OTLP data received from agents.
+func (e *CloudExporter) ExportProtoMetrics(ctx context.Context, resourceMetrics []*metricpb.ResourceMetrics) error {
+	if e == nil {
+		return nil
+	}
+
+	if e.metricClient != nil {
+		req := &colmetricpb.ExportMetricsServiceRequest{
+			ResourceMetrics: resourceMetrics,
+		}
+		_, err := e.metricClient.Export(ctx, req)
+		return err
+	}
+
 	return nil
 }
 

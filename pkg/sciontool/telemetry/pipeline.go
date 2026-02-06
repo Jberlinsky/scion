@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/ptone/scion-agent/pkg/sciontool/log"
+	metricpb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 )
 
@@ -74,8 +75,8 @@ func (p *Pipeline) Start(ctx context.Context) error {
 		log.Debug("Cloud export not configured - telemetry will only be received locally")
 	}
 
-	// Create receiver with span handler
-	p.receiver = NewReceiver(p.config, p.handleSpans)
+	// Create receiver with span and metric handlers
+	p.receiver = NewReceiver(p.config, p.handleSpans, WithMetricHandler(p.handleMetrics))
 
 	// Start receiver
 	if err := p.receiver.Start(ctx); err != nil {
@@ -213,4 +214,30 @@ func (p *Pipeline) filterSpans(resourceSpans []*tracepb.ResourceSpans) []*tracep
 	}
 
 	return result
+}
+
+// handleMetrics processes incoming metrics from the receiver.
+func (p *Pipeline) handleMetrics(ctx context.Context, resourceMetrics []*metricpb.ResourceMetrics) error {
+	if len(resourceMetrics) == 0 {
+		return nil
+	}
+
+	// Count total data points for logging
+	dpCount := 0
+	for _, rm := range resourceMetrics {
+		for _, sm := range rm.ScopeMetrics {
+			dpCount += len(sm.Metrics)
+		}
+	}
+
+	// Forward to cloud exporter if available
+	if p.exporter != nil {
+		if err := p.exporter.ExportProtoMetrics(ctx, resourceMetrics); err != nil {
+			log.Error("Failed to export metrics to cloud: %v", err)
+			return err
+		}
+		log.Debug("Exported %d metrics to cloud", dpCount)
+	}
+
+	return nil
 }

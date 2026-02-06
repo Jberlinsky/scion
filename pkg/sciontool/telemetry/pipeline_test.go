@@ -9,6 +9,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	metricpb "go.opentelemetry.io/proto/otlp/metrics/v1"
 )
 
 func TestNew_Disabled(t *testing.T) {
@@ -150,5 +152,75 @@ func TestNewWithConfig(t *testing.T) {
 	pipeline := NewWithConfig(cfg)
 	if pipeline == nil {
 		t.Error("Expected non-nil pipeline for enabled config")
+	}
+}
+
+func TestPipeline_HandleMetrics_NilExporter(t *testing.T) {
+	cfg := &Config{
+		Enabled:  true,
+		GRPCPort: 54323,
+		HTTPPort: 54324,
+	}
+	pipeline := NewWithConfig(cfg)
+	if pipeline == nil {
+		t.Fatal("Expected non-nil pipeline")
+	}
+
+	// handleMetrics with nil exporter should not error
+	err := pipeline.handleMetrics(context.Background(), []*metricpb.ResourceMetrics{
+		{ScopeMetrics: []*metricpb.ScopeMetrics{{Metrics: []*metricpb.Metric{{Name: "test"}}}}},
+	})
+	if err != nil {
+		t.Errorf("handleMetrics should not return error without exporter, got: %v", err)
+	}
+}
+
+func TestPipeline_HandleMetrics_Empty(t *testing.T) {
+	cfg := &Config{
+		Enabled:  true,
+		GRPCPort: 54325,
+		HTTPPort: 54326,
+	}
+	pipeline := NewWithConfig(cfg)
+	if pipeline == nil {
+		t.Fatal("Expected non-nil pipeline")
+	}
+
+	// Empty metrics should return nil
+	err := pipeline.handleMetrics(context.Background(), nil)
+	if err != nil {
+		t.Errorf("handleMetrics with empty input should return nil, got: %v", err)
+	}
+}
+
+func TestPipeline_MetricHandlerRegistered(t *testing.T) {
+	clearTelemetryEnv()
+	os.Setenv(EnvEnabled, "true")
+	os.Setenv(EnvCloudEnabled, "false")
+	os.Setenv(EnvGRPCPort, "54327")
+	os.Setenv(EnvHTTPPort, "54328")
+	defer clearTelemetryEnv()
+
+	pipeline := New()
+	if pipeline == nil {
+		t.Fatal("Expected non-nil pipeline")
+	}
+
+	ctx := context.Background()
+	if err := pipeline.Start(ctx); err != nil {
+		t.Fatalf("Failed to start pipeline: %v", err)
+	}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		pipeline.Stop(stopCtx)
+		cancel()
+	}()
+
+	// Verify the receiver has a metric handler registered
+	if pipeline.receiver == nil {
+		t.Fatal("Expected receiver to be created")
+	}
+	if pipeline.receiver.metricHandler == nil {
+		t.Error("Expected metric handler to be registered on receiver")
 	}
 }
