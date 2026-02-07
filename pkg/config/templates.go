@@ -130,6 +130,33 @@ func FindTemplateWithContext(ctx context.Context, name string) (*Template, error
 	return nil, fmt.Errorf("template %s not found", name)
 }
 
+// FindTemplateInScope finds a template by name in a specific scope only.
+// Scope must be "global" or "grove". Returns nil if not found in that scope.
+func FindTemplateInScope(name, scope string) *Template {
+	var dir string
+	var err error
+
+	switch scope {
+	case "global":
+		dir, err = GetGlobalTemplatesDir()
+	case "grove":
+		dir, err = GetProjectTemplatesDir()
+	default:
+		return nil
+	}
+
+	if err != nil {
+		return nil
+	}
+
+	path := filepath.Join(dir, name)
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		return &Template{Name: name, Path: path, Scope: scope}
+	}
+
+	return nil
+}
+
 // deriveTemplateName extracts a short template name from a URI for display purposes.
 func deriveTemplateName(uri string) string {
 	// For GitHub URLs, extract the folder name
