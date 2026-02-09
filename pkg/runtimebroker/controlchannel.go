@@ -62,6 +62,8 @@ type AgentLookup interface {
 	// LookupContainerID returns the container ID for an agent by its slug/name.
 	// Returns empty string if not found or agent doesn't support attach.
 	LookupContainerID(ctx context.Context, slug string) (containerID string, err error)
+	// RuntimeCommand returns the container runtime command (e.g., "docker", "container").
+	RuntimeCommand() string
 }
 
 // ControlChannelClient manages the WebSocket connection to the Hub.
@@ -575,8 +577,11 @@ func (c *ControlChannelClient) handlePTYStream(handler *StreamHandler, cols, row
 
 	slog.Debug("PTY stream found container", "slug", handler.slug, "containerID", containerID)
 
+	// Get the runtime command (docker, container, etc.)
+	runtimeCmd := c.agentLookup.RuntimeCommand()
+
 	// Start the actual PTY session
-	c.handlePTYStreamWithAgent(handler, cols, rows, containerID)
+	c.handlePTYStreamWithAgent(handler, cols, rows, containerID, runtimeCmd)
 
 	slog.Info("PTY stream ended via control channel", "slug", handler.slug)
 }

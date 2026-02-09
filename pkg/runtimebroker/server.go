@@ -511,6 +511,15 @@ func (s *Server) LookupContainerID(ctx context.Context, slug string) (string, er
 	return containerID, nil
 }
 
+// RuntimeCommand implements AgentLookup interface.
+// It returns the container runtime command (e.g., "docker", "container").
+func (s *Server) RuntimeCommand() string {
+	if s.runtime == nil {
+		return "docker" // Default fallback
+	}
+	return s.runtime.Name()
+}
+
 // startCredentialWatcher starts a goroutine that watches for credential file changes.
 // When credentials change, it reinitializes the Hub client and restarts services.
 func (s *Server) startCredentialWatcher(ctx context.Context) {

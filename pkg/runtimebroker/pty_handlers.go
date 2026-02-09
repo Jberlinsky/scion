@@ -308,6 +308,7 @@ type StreamPTYHandler struct {
 	handler     *StreamHandler
 	slug        string
 	containerID string
+	runtimeCmd  string // Container runtime command (docker, container, etc.)
 	cols        int
 	rows        int
 	ptyMaster   *os.File
@@ -318,13 +319,14 @@ type StreamPTYHandler struct {
 }
 
 // NewStreamPTYHandler creates a handler for a PTY stream from the control channel.
-func NewStreamPTYHandler(client *ControlChannelClient, handler *StreamHandler, containerID string, cols, rows int) *StreamPTYHandler {
+func NewStreamPTYHandler(client *ControlChannelClient, handler *StreamHandler, containerID, runtimeCmd string, cols, rows int) *StreamPTYHandler {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &StreamPTYHandler{
 		client:      client,
 		handler:     handler,
 		slug:        handler.slug,
 		containerID: containerID,
+		runtimeCmd:  runtimeCmd,
 		cols:        cols,
 		rows:        rows,
 		ctx:         ctx,
@@ -369,7 +371,7 @@ func (h *StreamPTYHandler) Run() error {
 	return err
 }
 
-// startDockerExec starts docker exec with tmux attach.
+// startExec starts container exec with tmux attach using the configured runtime.
 func (h *StreamPTYHandler) startDockerExec() error {
 	stdinReader, stdinWriter, err := os.Pipe()
 	if err != nil {
@@ -383,6 +385,12 @@ func (h *StreamPTYHandler) startDockerExec() error {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
+	// Use the configured runtime command (docker, container, etc.)
+	runtimeCmd := h.runtimeCmd
+	if runtimeCmd == "" {
+		runtimeCmd = "docker"
+	}
+
 	args := []string{
 		"exec", "-i",
 		"--user", "scion",
@@ -390,7 +398,7 @@ func (h *StreamPTYHandler) startDockerExec() error {
 		"tmux", "attach-session", "-t", "scion",
 	}
 
-	h.cmd = exec.CommandContext(h.ctx, "docker", args...)
+	h.cmd = exec.CommandContext(h.ctx, runtimeCmd, args...)
 	h.cmd.Stdin = stdinReader
 	h.cmd.Stdout = stdoutWriter
 	h.cmd.Stderr = stdoutWriter
@@ -400,7 +408,7 @@ func (h *StreamPTYHandler) startDockerExec() error {
 		stdinWriter.Close()
 		stdoutReader.Close()
 		stdoutWriter.Close()
-		return fmt.Errorf("failed to start docker exec: %w", err)
+		return fmt.Errorf("failed to start %s exec: %w", runtimeCmd, err)
 	}
 
 	stdinReader.Close()
@@ -469,8 +477,8 @@ func (h *StreamPTYHandler) Close() {
 }
 
 // handlePTYStreamWithAgent is called by the control channel to handle PTY streams.
-func (c *ControlChannelClient) handlePTYStreamWithAgent(handler *StreamHandler, cols, rows int, containerID string) {
-	ptyHandler := NewStreamPTYHandler(c, handler, containerID, cols, rows)
+func (c *ControlChannelClient) handlePTYStreamWithAgent(handler *StreamHandler, cols, rows int, containerID, runtimeCmd string) {
+	ptyHandler := NewStreamPTYHandler(c, handler, containerID, runtimeCmd, cols, rows)
 	if err := ptyHandler.Run(); err != nil && err != io.EOF {
 		slog.Error("PTY stream error", "slug", handler.slug, "error", err)
 	}
