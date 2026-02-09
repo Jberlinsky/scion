@@ -540,11 +540,12 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			TemplateCacheDir:     templateCacheDir,
 			TemplateCacheMaxSize: templateCacheMax,
 
-			// Control channel and heartbeat - enabled when Hub is configured.
-			// When co-located (both enabled, not simulating remote), skip control channel
-			// and network heartbeats since RuntimeBroker can communicate directly via 
-			// internal mechanism or localhost HTTP.
-			ControlChannelEnabled: hubEndpointForRH != "" && (simulateRemoteBroker || !enableHub),
+			// Control channel - always enabled when Hub is configured because
+			// PTY proxying requires the WebSocket control channel to route
+			// terminal I/O between clients and brokers.
+			// Heartbeat - disabled for co-located operation since we use
+			// the internal database heartbeat loop instead.
+			ControlChannelEnabled: hubEndpointForRH != "",
 			HeartbeatEnabled:      hubEndpointForRH != "" && (simulateRemoteBroker || !enableHub),
 		}
 
