@@ -136,11 +136,12 @@ type CreateBrokerRegistrationResponse struct {
 
 // BrokerJoinRequest is the request body for POST /api/v1/brokers/join.
 type BrokerJoinRequest struct {
-	BrokerID string   `json:"brokerId"`
-	JoinToken    string   `json:"joinToken"`
-	Hostname     string   `json:"hostname"`
-	Version      string   `json:"version"`
-	Capabilities []string `json:"capabilities,omitempty"`
+	BrokerID     string                `json:"brokerId"`
+	JoinToken    string                `json:"joinToken"`
+	Hostname     string                `json:"hostname"`
+	Version      string                `json:"version"`
+	Capabilities []string              `json:"capabilities,omitempty"`
+	Profiles     []store.BrokerProfile `json:"profiles,omitempty"`
 }
 
 // BrokerJoinResponse is the response for POST /api/v1/brokers/join.
@@ -278,6 +279,11 @@ func (s *BrokerAuthService) CompleteBrokerJoin(ctx context.Context, req BrokerJo
 	broker.ConnectionState = "connected"
 	broker.LastHeartbeat = time.Now()
 	broker.Updated = time.Now()
+
+	// Update profiles if provided in the join request
+	if len(req.Profiles) > 0 {
+		broker.Profiles = req.Profiles
+	}
 
 	if err := s.store.UpdateRuntimeBroker(ctx, broker); err != nil {
 		return nil, fmt.Errorf("failed to update runtime broker: %w", err)

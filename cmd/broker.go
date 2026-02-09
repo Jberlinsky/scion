@@ -394,6 +394,9 @@ func runBrokerRegister(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("Broker created (ID: %s), completing join...\n", createResp.BrokerID)
 
+		// Build profiles from settings to send to Hub
+		profiles := buildBrokerProfiles(settings)
+
 		// Phase 2: Complete broker join with join token
 		joinReq := &hubclient.JoinBrokerRequest{
 			BrokerID:  createResp.BrokerID,
@@ -404,6 +407,7 @@ func runBrokerRegister(cmd *cobra.Command, args []string) error {
 				"sync",
 				"attach",
 			},
+			Profiles: profiles,
 		}
 
 		joinResp, err := client.RuntimeBrokers().Join(ctx, joinReq)
@@ -1321,4 +1325,40 @@ func resolveBrokerByNameOrID(ctx context.Context, client hubclient.Client, nameO
 	default:
 		return nil, fmt.Errorf("multiple brokers found with name '%s' - please use the broker ID instead", nameOrID)
 	}
+}
+
+// buildBrokerProfiles builds BrokerProfile objects from settings.Profiles.
+// It converts the user-defined profiles in settings.yaml to the format expected by the Hub.
+func buildBrokerProfiles(settings *config.Settings) []hubclient.BrokerProfile {
+	if settings == nil || len(settings.Profiles) == 0 {
+		return nil
+	}
+
+	var profiles []hubclient.BrokerProfile
+	for name, profileCfg := range settings.Profiles {
+		// Determine runtime type from the profile's runtime reference
+		runtimeType := profileCfg.Runtime
+		if runtimeType == "" {
+			runtimeType = "docker" // default
+		}
+
+		// Look up runtime config to get additional info (context, namespace for K8s)
+		var context, namespace string
+		if settings.Runtimes != nil {
+			if rtCfg, ok := settings.Runtimes[profileCfg.Runtime]; ok {
+				context = rtCfg.Context
+				namespace = rtCfg.Namespace
+			}
+		}
+
+		profiles = append(profiles, hubclient.BrokerProfile{
+			Name:      name,
+			Type:      runtimeType,
+			Available: true,
+			Context:   context,
+			Namespace: namespace,
+		})
+	}
+
+	return profiles
 }

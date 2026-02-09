@@ -104,11 +104,12 @@ type CreateBrokerResponse struct {
 
 // JoinBrokerRequest is the request to complete broker registration.
 type JoinBrokerRequest struct {
-	BrokerID string   `json:"brokerId"`
-	JoinToken    string   `json:"joinToken"`
-	Hostname     string   `json:"hostname"`
-	Version      string   `json:"version"`
-	Capabilities []string `json:"capabilities,omitempty"`
+	BrokerID     string          `json:"brokerId"`
+	JoinToken    string          `json:"joinToken"`
+	Hostname     string          `json:"hostname"`
+	Version      string          `json:"version"`
+	Capabilities []string        `json:"capabilities,omitempty"`
+	Profiles     []BrokerProfile `json:"profiles,omitempty"`
 }
 
 // JoinBrokerResponse is returned after completing broker registration.

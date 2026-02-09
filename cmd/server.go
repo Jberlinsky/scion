@@ -317,6 +317,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 	var brokerID string
 	var brokerName string
 	var rt runtime.Runtime
+	var brokerSettings *config.Settings
 	var hubSrv *hub.Server
 	var mgr agent.Manager
 
@@ -458,11 +459,13 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 
 		// Load settings to get/persist runtime broker identity.
 		// The brokerID should be durable across server restarts, so we store it in settings.
-		settings, err := config.LoadSettings(globalDir)
+		var err error
+		brokerSettings, err = config.LoadSettings(globalDir)
 		if err != nil {
 			log.Printf("Warning: failed to load settings: %v", err)
-			settings = &config.Settings{}
+			brokerSettings = &config.Settings{}
 		}
+		settings := brokerSettings
 
 		// Ensure hub config exists in settings
 		if settings.Hub == nil {
@@ -579,7 +582,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 		}
 
 		// Register global grove and runtime broker
-		if err := registerGlobalGroveAndBroker(ctx, s, brokerID, brokerName, rhEndpoint, rt, serverAutoProvide); err != nil {
+		if err := registerGlobalGroveAndBroker(ctx, s, brokerID, brokerName, rhEndpoint, rt, serverAutoProvide, brokerSettings); err != nil {
 			log.Printf("Warning: failed to register global grove: %v", err)
 		} else {
 			log.Printf("Registered global grove with runtime broker %s (endpoint: %s, autoProvide: %v)", brokerName, rhEndpoint, serverAutoProvide)
@@ -622,7 +625,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 
 // registerGlobalGroveAndBroker creates the global grove and registers this
 // runtime broker as a provider. This enables automatic agent handoff.
-func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, brokerName, endpoint string, rt runtime.Runtime, autoProvide bool) error {
+func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, brokerName, endpoint string, rt runtime.Runtime, autoProvide bool, settings *config.Settings) error {
 	// Check if global grove already exists
 	globalGrove, err := s.GetGroveBySlug(ctx, GlobalGroveName)
 	if err != nil && err != store.ErrNotFound {
@@ -657,6 +660,9 @@ func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, 
 		runtimeType = rt.Name()
 	}
 
+	// Build profiles from settings, falling back to a default profile if none defined
+	profiles := buildStoreBrokerProfiles(settings, runtimeType)
+
 	broker, err := s.GetRuntimeBroker(ctx, brokerID)
 	if err != nil && err != store.ErrNotFound {
 		return fmt.Errorf("failed to check for runtime broker: %w", err)
@@ -677,9 +683,7 @@ func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, 
 				Sync:   true,
 				Attach: true,
 			},
-			Profiles: []store.BrokerProfile{
-				{Name: "default", Type: runtimeType, Available: true},
-			},
+			Profiles: profiles,
 		}
 
 		if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
@@ -692,10 +696,8 @@ func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, 
 		broker.Endpoint = endpoint
 		broker.AutoProvide = autoProvide
 		broker.LastHeartbeat = time.Now()
-		// Update profiles to reflect current runtime (may have changed if broker moved between hosts)
-		broker.Profiles = []store.BrokerProfile{
-			{Name: "default", Type: runtimeType, Available: true},
-		}
+		// Update profiles from settings (may have changed)
+		broker.Profiles = profiles
 		if err := s.UpdateRuntimeBroker(ctx, broker); err != nil {
 			return fmt.Errorf("failed to update runtime broker: %w", err)
 		}
@@ -893,6 +895,45 @@ func (d *agentDispatcherAdapter) DispatchAgentDelete(ctx context.Context, hubAge
 	}
 
 	return nil
+}
+
+// buildStoreBrokerProfiles builds store.BrokerProfile objects from settings.Profiles.
+// If no profiles are defined in settings, returns a default profile with the detected runtime type.
+func buildStoreBrokerProfiles(settings *config.Settings, defaultRuntimeType string) []store.BrokerProfile {
+	// If no settings or no profiles defined, return a default profile
+	if settings == nil || len(settings.Profiles) == 0 {
+		return []store.BrokerProfile{
+			{Name: "default", Type: defaultRuntimeType, Available: true},
+		}
+	}
+
+	var profiles []store.BrokerProfile
+	for name, profileCfg := range settings.Profiles {
+		// Determine runtime type from the profile's runtime reference
+		runtimeType := profileCfg.Runtime
+		if runtimeType == "" {
+			runtimeType = defaultRuntimeType
+		}
+
+		// Look up runtime config to get additional info (context, namespace for K8s)
+		var context, namespace string
+		if settings.Runtimes != nil {
+			if rtCfg, ok := settings.Runtimes[profileCfg.Runtime]; ok {
+				context = rtCfg.Context
+				namespace = rtCfg.Namespace
+			}
+		}
+
+		profiles = append(profiles, store.BrokerProfile{
+			Name:      name,
+			Type:      runtimeType,
+			Available: true,
+			Context:   context,
+			Namespace: namespace,
+		})
+	}
+
+	return profiles
 }
 
 // DispatchAgentMessage implements hub.AgentDispatcher.
