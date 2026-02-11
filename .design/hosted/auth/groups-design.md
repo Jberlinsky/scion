@@ -73,12 +73,13 @@ An LLM agent running in a container. Agents authenticate to the Hub via scoped J
 ```go
 // Extended from the existing Agent model with principal-relevant fields.
 type Agent struct {
-    ID              string    // UUID primary key
-    Slug            string    // URL-safe identifier (unique per grove)
-    GroveID         string    // FK to Grove - every agent belongs to exactly one grove
-    CreatedBy       string    // FK to User - the human who created this agent
-    OwnerID         string    // FK to User - current owner (may differ from creator)
-    Status          string    // provisioning, running, stopped, error
+    ID                string    // UUID primary key
+    Slug              string    // URL-safe identifier (unique per grove)
+    GroveID           string    // FK to Grove - every agent belongs to exactly one grove
+    CreatedBy         string    // FK to User - the human who created this agent
+    OwnerID           string    // FK to User - current owner (may differ from creator)
+    DelegationEnabled bool      // Default: false. When true, creator relationship is policy-addressable.
+    Status            string    // provisioning, running, stopped, error
     // ... other operational fields unchanged
 }
 ```
@@ -87,7 +88,7 @@ type Agent struct {
 - Automatically included in the dynamic grove group for its grove
 - Can be an explicit member of other groups
 - Can be bound directly to policies (for agent-specific permissions)
-- Acts as a **delegate** of its creating user (see Section 3)
+- Optionally a **delegate** of its creating user (see Section 3) - off by default, must be explicitly enabled
 
 ### 2.3 Group
 
@@ -104,27 +105,82 @@ Both types are first-class groups that can appear in policy bindings. The distin
 
 ## 3. Agent Delegation Model
 
-When a user creates an agent, that agent may need to perform actions on the user's behalf (e.g., creating sub-agents, reading grove secrets). Rather than requiring separate policies for every agent, the system supports a delegation model.
+When a user creates an agent, that agent may need to be granted access to resources based on its relationship to that user. Rather than requiring policies to enumerate every individual agent, the system supports a delegation model that makes an agent's creator-relationship addressable in policy.
 
-### 3.1 Delegation Semantics
+### 3.1 What Delegation Is (and Is Not)
 
-An agent **created by** a user is a delegate of that user. Delegation means:
+Delegation **does not** mean the agent "acts as" the user. An agent with delegation enabled is not impersonating its creator and does not automatically inherit the creator's permissions. Instead, delegation establishes a **queryable relationship** between agent and creator that policies can reference.
 
-1. **The agent's `CreatedBy` field** establishes the delegation chain
-2. **During policy evaluation**, when checking if an agent has access to a resource, the system can optionally evaluate whether the agent's creating user would have access
-3. **Delegation is bounded** - an agent can never exceed the permissions of its creating user
-4. **Delegation is not transitive through agents** - if Agent A creates Agent B, Agent B's delegate is Agent A's `CreatedBy` user, not Agent A itself
+**Delegation means:** policies can be written that target "agents created by user X" or "agents whose creator is in group Y" as a principal selector. The agent remains a distinct principal with its own identity.
 
-### 3.2 Delegation vs. Direct Agent Policies
+**Delegation does not mean:** the agent silently gains all of the creator's permissions. Access must still be explicitly granted through policies that reference the delegation relationship.
+
+### 3.2 Delegation Flag
+
+Delegation is controlled by a per-agent boolean flag, **off by default**:
+
+```go
+type Agent struct {
+    // ...existing fields...
+    DelegationEnabled bool   // Default: false. When true, creator relationship is policy-addressable.
+    CreatedBy         string // FK to User - always set regardless of delegation flag
+}
+```
+
+- **`DelegationEnabled: false`** (default) - The agent is an independent principal. Its `CreatedBy` field is tracked for audit purposes but is not used during policy evaluation.
+- **`DelegationEnabled: true`** - The agent's creator relationship becomes a policy-addressable attribute. Policies can grant or deny access based on "agents delegated from user X."
+
+The flag is set at agent creation time and can be modified by the agent's owner.
+
+### 3.3 Policy Expressions Using Delegation
+
+With delegation enabled, policies can reference agents through their creator:
+
+```json
+{
+  "name": "alice-agents-grove-read",
+  "description": "Alice's delegated agents can read grove resources",
+  "scopeType": "grove",
+  "scopeId": "grove-uuid",
+  "resourceType": "*",
+  "actions": ["read"],
+  "effect": "allow",
+  "conditions": {
+    "delegatedFrom": {
+      "principalType": "user",
+      "principalId": "alice-uuid"
+    }
+  }
+}
+```
+
+Or more broadly, targeting delegated agents from any member of a group:
+
+```json
+{
+  "name": "team-agents-access",
+  "description": "Delegated agents from platform-team members can read templates",
+  "scopeType": "grove",
+  "scopeId": "grove-uuid",
+  "resourceType": "template",
+  "actions": ["read"],
+  "effect": "allow",
+  "conditions": {
+    "delegatedFromGroup": "platform-team-uuid"
+  }
+}
+```
+
+### 3.4 Access Mechanisms Comparison
 
 | Mechanism | Use Case | Example |
 |-----------|----------|---------|
-| **Delegation** | Agent needs the same access as its creator | Agent reads grove secrets that its creator can access |
+| **Delegation policy** | Grant access to agents based on who created them | "Alice's agents can read grove secrets" |
 | **Direct policy** | Agent needs specific, bounded access | Agent can only update its own status |
 | **Grove group** | All agents in a grove share access | All agents in `my-project` grove can read project templates |
-| **Agent scope** | JWT-level access control | Agent token has `agent:status:update` scope |
+| **Agent scope (JWT)** | Transport-level access control | Agent token has `agent:status:update` scope |
 
-### 3.3 Delegation Resolution
+### 3.5 Delegation Resolution During Policy Evaluation
 
 ```
 Agent (principal)
@@ -135,17 +191,24 @@ Agent (principal)
   ├── Check: Is agent in a group with policy granting access?
   │     └── Yes → Allow (subject to effect)
   │
-  └── Check: Does agent's CreatedBy user have access? (delegation)
-        └── Yes → Allow, but constrained by agent's JWT scopes
+  └── Check: Is agent.DelegationEnabled == true?
+        │
+        ├── No → No further checks
+        │
+        └── Yes → Check: Do any policies with delegation conditions match
+              │   this agent's creator (or creator's groups)?
+              └── Yes → Allow, but constrained by agent's JWT scopes
 ```
 
-Delegation is the lowest-priority check. Direct agent policies and group memberships take precedence.
+Direct agent policies and group memberships take precedence over delegation-based policies.
 
-### 3.4 Delegation Constraints
+### 3.6 Delegation Constraints
 
-- **JWT scope gating**: Even if delegation would grant access, the agent's JWT scopes must include the relevant scope. An agent with only `agent:status:update` scope cannot leverage delegation to read grove secrets.
-- **Owner transfer**: If an agent's `OwnerID` is transferred to a different user, delegation still follows `CreatedBy`. Ownership determines resource-level control; delegation determines inherited permissions.
-- **Suspended users**: If the creating user is suspended, delegation for their agents is suspended as well.
+- **Off by default**: Agents must explicitly opt in to delegation at creation time. This prevents unintended privilege inheritance.
+- **JWT scope gating**: Even if a delegation policy would grant access, the agent's JWT scopes must include the relevant scope. An agent with only `agent:status:update` scope cannot leverage delegation to read grove secrets.
+- **Not transitive through agents**: If Agent A creates Agent B, Agent B's delegation (if enabled) references Agent A's `CreatedBy` user, not Agent A itself. Agents cannot delegate to other agents.
+- **Owner transfer**: If an agent's `OwnerID` is transferred to a different user, delegation still follows `CreatedBy`. Ownership determines resource-level control; delegation determines the creator relationship.
+- **Suspended users**: If the creating user is suspended, delegation-based policies matching that user do not grant access.
 
 ---
 
@@ -319,9 +382,10 @@ func (Agent) Fields() []ent.Field {
         field.Enum("status").Values("provisioning", "running", "stopped", "error", "pending").
             Default("pending"),
 
-        // Delegation: who created this agent
+        // Delegation: who created this agent and whether delegation is active
         field.UUID("created_by", uuid.UUID{}).Optional(),
         field.UUID("owner_id", uuid.UUID{}).Optional(),
+        field.Bool("delegation_enabled").Default(false),
 
         field.String("visibility").Default("private"),
 
@@ -582,38 +646,58 @@ func getEffectiveGroupsForAgent(ctx context.Context, client *ent.Client, agentID
 }
 ```
 
-### 6.3 Delegation Check
+### 6.3 Delegation-Based Policy Matching
+
+When an agent has `DelegationEnabled == true`, the policy engine checks for policies
+with delegation conditions that match the agent's creator.
 
 ```go
-func checkDelegatedAccess(
+func findDelegationPolicies(
     ctx context.Context,
     client *ent.Client,
     agentID uuid.UUID,
     resource Resource,
     action Action,
-) (bool, error) {
-    // Get the agent's creator
+) ([]*Policy, error) {
+    // Get the agent with delegation flag and creator
     agent, err := client.Agent.Query().
         Where(agent_ent.ID(agentID)).
         WithCreator().
         Only(ctx)
     if err != nil {
-        return false, err
+        return nil, err
+    }
+
+    // Delegation must be explicitly enabled
+    if !agent.DelegationEnabled {
+        return nil, nil
     }
 
     creator := agent.Edges.Creator
     if creator == nil {
-        return false, nil // No delegation possible without a creator
+        return nil, nil // No delegation possible without a creator
     }
 
-    // Check if the creator is suspended
+    // Suspended creators cannot be delegation sources
     if creator.Status == user.StatusSuspended {
-        return false, nil // Suspended users cannot delegate
+        return nil, nil
     }
 
-    // Evaluate as if the creator is the principal
-    // (the caller must also verify the agent's JWT scopes)
-    return evaluateAccess(ctx, client, creator.ID, resource, action)
+    // Find policies with delegation conditions matching this creator
+    // This checks both direct "delegatedFrom" user matches and
+    // "delegatedFromGroup" matches against the creator's effective groups
+    creatorGroups, err := getEffectiveGroups(ctx, client, creator.ID)
+    if err != nil {
+        return nil, err
+    }
+
+    // Query policies that have delegation conditions matching either
+    // the creator's ID or any of the creator's groups
+    policies, err := findPoliciesWithDelegationConditions(
+        ctx, client, creator.ID, creatorGroups, resource, action,
+    )
+
+    return policies, err
 }
 ```
 
@@ -776,8 +860,9 @@ When a grove is deleted:
 When an agent is provisioned:
 
 1. Agent is automatically visible as a member of the grove's dynamic group (no explicit membership record needed)
-2. Set `CreatedBy` to the authenticated user's ID (establishes delegation chain)
-3. If the agent's template specifies default group memberships, add those explicit memberships
+2. Set `CreatedBy` to the authenticated user's ID
+3. Set `DelegationEnabled` based on the creation request (defaults to `false`)
+4. If the agent's template specifies default group memberships, add those explicit memberships
 
 ### 8.4 Agent Deleted
 
@@ -1001,40 +1086,39 @@ All principal and group operations are logged:
 
 ---
 
-## 14. Open Questions
+## 14. Resolved Questions
+
+The following questions were raised during the design process and have been resolved.
 
 ### 14.1 Agent Group Membership Persistence
 
 **Question:** Should agents that are explicitly added to groups retain that membership across agent restarts (stop/start cycles)?
 
-**Current assumption:** Yes. Explicit group memberships are tied to the agent's identity (UUID), not its runtime lifecycle. An agent that is stopped and restarted retains its memberships. Only deletion removes memberships.
+**Decision:** Yes. Explicit group memberships are tied to the agent's identity (UUID), not its runtime lifecycle. An agent that is stopped and restarted retains its memberships. Only deletion removes memberships.
 
-### 14.2 Delegation Opt-Out
+### 14.2 Delegation Model
 
-**Question:** Should users be able to opt out of delegation for agents they create?
+**Question:** Should users be able to control delegation for agents they create?
 
-**Options:**
-1. **Always delegate** (current) - Simpler; agents always have their creator's access as a fallback
-2. **Per-agent flag** - Creator can mark an agent as non-delegated at creation time
-3. **Per-grove setting** - Grove-level configuration controls whether delegation is enabled
+**Decision:** Per-agent flag, off by default. Delegation does not mean the agent "acts as" the user as a principal. It means the agent is an elevated type of principal whose creator-relationship is addressable in policy — e.g., "John's agents are allowed to X." See Section 3 for the full design.
 
 ### 14.3 Grove Group Visibility in Group Listings
 
 **Question:** Should grove groups appear in the general `/api/v1/groups` listing, or should they be filtered to grove-specific endpoints?
 
-**Current assumption:** They appear in the general listing with `groupType: "grove_agents"` so clients can filter. A `groupType` query parameter on the list endpoint enables filtering.
+**Decision:** They appear in the general listing with `groupType: "grove_agents"` so clients can filter. A `groupType` query parameter on the list endpoint enables filtering.
 
 ### 14.4 Cross-Grove Agent Membership
 
 **Question:** Can an agent in Grove A be an explicit member of a group used in policies for Grove B?
 
-**Current assumption:** Yes. Explicit group membership is not scoped to a grove. This enables cross-grove collaboration patterns (e.g., a shared "CI agents" group). However, the agent's JWT scopes still limit what it can actually do.
+**Decision:** Yes. Explicit group membership is not scoped to a grove. This enables cross-grove collaboration patterns (e.g., a shared "CI agents" group). However, the agent's JWT scopes still limit what it can actually do.
 
 ### 14.5 Maximum Group Size
 
 **Question:** Should there be a limit on the number of members in a single group?
 
-**Current assumption:** No hard limit initially. Monitor performance of group expansion queries and add limits if needed. The depth limit (10 levels) bounds transitive expansion cost, but breadth is unconstrained.
+**Decision:** No hard limit initially. Monitor performance of group expansion queries and add limits if needed. The depth limit (10 levels) bounds transitive expansion cost, but breadth is unconstrained.
 
 ---
 
