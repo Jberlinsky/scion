@@ -1067,14 +1067,14 @@ All principal and group operations are logged:
 - [x] Update `handlers_groups.go` to support `principalType: "agent"`
 
 ### Phase 3: Dynamic Grove Groups
-- [ ] Implement automatic grove group creation on grove registration
-- [ ] Implement grove group deletion on grove deletion
-- [ ] Implement query-time membership resolution for grove groups
-- [ ] Add grove group to effective group expansion
+- [x] Implement automatic grove group creation on grove registration
+- [x] Implement grove group deletion on grove deletion
+- [x] Implement query-time membership resolution for grove groups
+- [x] Add grove group to effective group expansion
 
 ### Phase 4: Principal Resolution
 - [ ] Implement `GetEffectiveGroups` for users (transitive group expansion)
-- [ ] Implement `GetEffectiveGroupsForAgent` (grove group + explicit groups + transitive expansion)
+- [x] Implement `GetEffectiveGroupsForAgent` (grove group + explicit groups + transitive expansion)
 - [ ] Implement delegation resolution (`checkDelegatedAccess`)
 - [ ] Add principal query endpoints (`/users/me/groups`, `/agents/{id}/groups`, `/principals/{type}/{id}`)
 
