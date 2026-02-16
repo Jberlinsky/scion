@@ -47,6 +47,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/store"
 	"github.com/ptone/scion-agent/pkg/store/entadapter"
 	"github.com/ptone/scion-agent/pkg/store/sqlite"
+	"github.com/ptone/scion-agent/pkg/util"
 	"github.com/ptone/scion-agent/pkg/util/logging"
 	"github.com/spf13/cobra"
 )
@@ -275,6 +276,21 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 		log.Println("Initializing global scion directory...")
 		if err := config.InitGlobal(harness.All()); err != nil {
 			return fmt.Errorf("failed to initialize global config: %w", err)
+		}
+	}
+
+	// Warn if running from within a project grove instead of the global (~/.scion) grove.
+	// The server loads templates and settings from the active grove context, so running
+	// inside a project grove may pick up project-specific (possibly legacy) configuration.
+	if projectDir, ok := config.FindProjectRoot(); ok {
+		if projectDir != globalDir {
+			parentDir := filepath.Dir(projectDir)
+			fmt.Fprintf(os.Stderr, "\n%s%s WARNING: Server is running from a project grove context (%s)%s\n",
+				util.Bold, util.Yellow, parentDir, util.Reset)
+			fmt.Fprintf(os.Stderr, "%s%s          The runtime broker will use this grove's templates and settings.%s\n",
+				util.Bold, util.Yellow, util.Reset)
+			fmt.Fprintf(os.Stderr, "%s%s          For machine-wide operation, run the server from outside any project grove.%s\n\n",
+				util.Bold, util.Yellow, util.Reset)
 		}
 	}
 
