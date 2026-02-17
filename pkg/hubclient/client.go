@@ -246,6 +246,14 @@ func WithAutoDevAuth() Option {
 	}
 }
 
+// WithAgentToken sets agent token authentication using the X-Scion-Agent-Token header.
+// Use this when authenticating as an agent (not a user) to the Hub API.
+func WithAgentToken(token string) Option {
+	return func(c *client) {
+		c.transport.Auth = &apiclient.AgentTokenAuth{Token: token}
+	}
+}
+
 // WithHMACAuth sets HMAC-based broker authentication.
 // This is used by Runtime Brokers to authenticate with the Hub using
 // the shared secret established during the join process.

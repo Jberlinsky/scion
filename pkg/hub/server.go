@@ -587,6 +587,11 @@ func (s *Server) CreateAuthenticatedDispatcher() *HTTPAgentDispatcher {
 		dispatcher.SetSecretBackend(s.secretBackend)
 	}
 
+	// In dev-auth mode, pass the dev token so agents get it for fallback auth
+	if s.config.DevAuthToken != "" {
+		dispatcher.SetDevAuthToken(s.config.DevAuthToken)
+	}
+
 	return dispatcher
 }
 
@@ -603,10 +608,22 @@ func (s *Server) GenerateAgentToken(agentID, groveID string, additionalScopes ..
 	}
 
 	scopes := []AgentTokenScope{ScopeAgentStatusUpdate}
+
+	// In dev-auth mode, auto-grant agent creation and lifecycle scopes
+	// so agents can create sub-agents without explicit template configuration.
+	if s.config.DevAuthToken != "" {
+		scopes = append(scopes, ScopeAgentCreate, ScopeAgentLifecycle)
+	}
+
+	// Merge additional scopes, deduplicating
+	seen := make(map[AgentTokenScope]bool, len(scopes))
+	for _, sc := range scopes {
+		seen[sc] = true
+	}
 	for _, scope := range additionalScopes {
-		// Avoid duplicating the default scope
-		if scope != ScopeAgentStatusUpdate {
+		if !seen[scope] {
 			scopes = append(scopes, scope)
+			seen[scope] = true
 		}
 	}
 

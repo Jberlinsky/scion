@@ -939,6 +939,144 @@ func TestHTTPAgentDispatcher_DispatchAgentStart_WithGroveProviderPath(t *testing
 	}
 }
 
+func TestHTTPAgentDispatcher_DispatchAgentCreate_InjectsDevToken(t *testing.T) {
+	ctx := context.Background()
+	memStore := createTestStore(t)
+
+	broker := &store.RuntimeBroker{
+		ID:       "host-1",
+		Name:     "test-host",
+		Slug:     "test-host",
+		Endpoint: "http://localhost:9800",
+		Status:   store.BrokerStatusOnline,
+	}
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	mockClient := &mockRuntimeBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
+	dispatcher.SetDevAuthToken("my-dev-token")
+
+	agent := &store.Agent{
+		ID:              "agent-1",
+		Name:            "test-agent",
+		Slug:            "test-agent",
+		GroveID:         "grove-1",
+		RuntimeBrokerID: "host-1",
+		AppliedConfig: &store.AgentAppliedConfig{
+			Harness: "claude",
+		},
+	}
+
+	err := dispatcher.DispatchAgentCreate(ctx, agent)
+	if err != nil {
+		t.Fatalf("DispatchAgentCreate failed: %v", err)
+	}
+
+	if !mockClient.createCalled {
+		t.Fatal("expected CreateAgent to be called")
+	}
+
+	// Verify SCION_DEV_TOKEN was injected into ResolvedEnv
+	if mockClient.lastCreateReq.ResolvedEnv == nil {
+		t.Fatal("expected ResolvedEnv to be non-nil")
+	}
+	if mockClient.lastCreateReq.ResolvedEnv["SCION_DEV_TOKEN"] != "my-dev-token" {
+		t.Errorf("expected SCION_DEV_TOKEN='my-dev-token', got %q",
+			mockClient.lastCreateReq.ResolvedEnv["SCION_DEV_TOKEN"])
+	}
+}
+
+func TestHTTPAgentDispatcher_DispatchAgentCreate_NoDevToken(t *testing.T) {
+	ctx := context.Background()
+	memStore := createTestStore(t)
+
+	broker := &store.RuntimeBroker{
+		ID:       "host-1",
+		Name:     "test-host",
+		Slug:     "test-host",
+		Endpoint: "http://localhost:9800",
+		Status:   store.BrokerStatusOnline,
+	}
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	mockClient := &mockRuntimeBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
+	// Do NOT set dev auth token
+
+	agent := &store.Agent{
+		ID:              "agent-1",
+		Name:            "test-agent",
+		Slug:            "test-agent",
+		GroveID:         "grove-1",
+		RuntimeBrokerID: "host-1",
+	}
+
+	err := dispatcher.DispatchAgentCreate(ctx, agent)
+	if err != nil {
+		t.Fatalf("DispatchAgentCreate failed: %v", err)
+	}
+
+	// Verify SCION_DEV_TOKEN is NOT in ResolvedEnv when devAuthToken is empty
+	if mockClient.lastCreateReq.ResolvedEnv != nil {
+		if _, exists := mockClient.lastCreateReq.ResolvedEnv["SCION_DEV_TOKEN"]; exists {
+			t.Error("expected SCION_DEV_TOKEN NOT to be present when devAuthToken is empty")
+		}
+	}
+}
+
+func TestHTTPAgentDispatcher_DispatchAgentCreate_DevTokenMergesWithExistingEnv(t *testing.T) {
+	ctx := context.Background()
+	memStore := createTestStore(t)
+
+	broker := &store.RuntimeBroker{
+		ID:       "host-1",
+		Name:     "test-host",
+		Slug:     "test-host",
+		Endpoint: "http://localhost:9800",
+		Status:   store.BrokerStatusOnline,
+	}
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	mockClient := &mockRuntimeBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
+	dispatcher.SetDevAuthToken("my-dev-token")
+
+	agent := &store.Agent{
+		ID:              "agent-1",
+		Name:            "test-agent",
+		Slug:            "test-agent",
+		GroveID:         "grove-1",
+		RuntimeBrokerID: "host-1",
+		AppliedConfig: &store.AgentAppliedConfig{
+			Harness: "claude",
+			Env: map[string]string{
+				"EXISTING_VAR": "existing-value",
+			},
+		},
+	}
+
+	err := dispatcher.DispatchAgentCreate(ctx, agent)
+	if err != nil {
+		t.Fatalf("DispatchAgentCreate failed: %v", err)
+	}
+
+	// Verify both existing env and SCION_DEV_TOKEN are present
+	if mockClient.lastCreateReq.ResolvedEnv["EXISTING_VAR"] != "existing-value" {
+		t.Errorf("expected EXISTING_VAR='existing-value', got %q",
+			mockClient.lastCreateReq.ResolvedEnv["EXISTING_VAR"])
+	}
+	if mockClient.lastCreateReq.ResolvedEnv["SCION_DEV_TOKEN"] != "my-dev-token" {
+		t.Errorf("expected SCION_DEV_TOKEN='my-dev-token', got %q",
+			mockClient.lastCreateReq.ResolvedEnv["SCION_DEV_TOKEN"])
+	}
+}
+
 func TestHTTPAgentDispatcher_DispatchAgentStart_AppliesBrokerResponse(t *testing.T) {
 	ctx := context.Background()
 	memStore := createTestStore(t)

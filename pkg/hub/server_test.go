@@ -19,6 +19,7 @@ package hub
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/ptone/scion-agent/pkg/store/sqlite"
 )
@@ -68,5 +69,135 @@ func TestServer_PersistentSigningKeys(t *testing.T) {
 	}
 	if string(userKey1) != string(userKey2) {
 		t.Errorf("user signing keys do not match: %x != %x", userKey1, userKey2)
+	}
+}
+
+func TestServer_GenerateAgentToken_DevAuthAutoGrantsScopes(t *testing.T) {
+	s, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+
+	cfg := DefaultServerConfig()
+	cfg.DevAuthToken = "test-dev-token"
+	cfg.AgentTokenConfig = AgentTokenConfig{
+		SigningKey:    make([]byte, 32),
+		TokenDuration: time.Hour,
+	}
+
+	srv := New(cfg, s)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	// Generate token without any additional scopes
+	token, err := srv.GenerateAgentToken("agent-1", "grove-1")
+	if err != nil {
+		t.Fatalf("GenerateAgentToken failed: %v", err)
+	}
+
+	// Validate the token and check scopes
+	claims, err := srv.agentTokenService.ValidateAgentToken(token)
+	if err != nil {
+		t.Fatalf("ValidateAgentToken failed: %v", err)
+	}
+
+	if !claims.HasScope(ScopeAgentStatusUpdate) {
+		t.Error("expected ScopeAgentStatusUpdate to be present")
+	}
+	if !claims.HasScope(ScopeAgentCreate) {
+		t.Error("expected ScopeAgentCreate to be auto-granted in dev-auth mode")
+	}
+	if !claims.HasScope(ScopeAgentLifecycle) {
+		t.Error("expected ScopeAgentLifecycle to be auto-granted in dev-auth mode")
+	}
+}
+
+func TestServer_GenerateAgentToken_DevAuthDeduplicatesScopes(t *testing.T) {
+	s, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+
+	cfg := DefaultServerConfig()
+	cfg.DevAuthToken = "test-dev-token"
+	cfg.AgentTokenConfig = AgentTokenConfig{
+		SigningKey:    make([]byte, 32),
+		TokenDuration: time.Hour,
+	}
+
+	srv := New(cfg, s)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	// Generate token with explicit scopes that overlap with auto-granted ones
+	token, err := srv.GenerateAgentToken("agent-1", "grove-1",
+		ScopeAgentCreate, ScopeAgentLifecycle, ScopeGroveSecretRead)
+	if err != nil {
+		t.Fatalf("GenerateAgentToken failed: %v", err)
+	}
+
+	claims, err := srv.agentTokenService.ValidateAgentToken(token)
+	if err != nil {
+		t.Fatalf("ValidateAgentToken failed: %v", err)
+	}
+
+	// Count occurrences of each scope to verify deduplication
+	scopeCounts := make(map[AgentTokenScope]int)
+	for _, sc := range claims.Scopes {
+		scopeCounts[sc]++
+	}
+
+	if scopeCounts[ScopeAgentCreate] != 1 {
+		t.Errorf("expected ScopeAgentCreate once, got %d", scopeCounts[ScopeAgentCreate])
+	}
+	if scopeCounts[ScopeAgentLifecycle] != 1 {
+		t.Errorf("expected ScopeAgentLifecycle once, got %d", scopeCounts[ScopeAgentLifecycle])
+	}
+	if !claims.HasScope(ScopeGroveSecretRead) {
+		t.Error("expected ScopeGroveSecretRead to be present from explicit scopes")
+	}
+}
+
+func TestServer_GenerateAgentToken_NoDevAuthDoesNotAutoGrant(t *testing.T) {
+	s, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+
+	cfg := DefaultServerConfig()
+	// DevAuthToken is empty - not dev-auth mode
+	cfg.AgentTokenConfig = AgentTokenConfig{
+		SigningKey:    make([]byte, 32),
+		TokenDuration: time.Hour,
+	}
+
+	srv := New(cfg, s)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	token, err := srv.GenerateAgentToken("agent-1", "grove-1")
+	if err != nil {
+		t.Fatalf("GenerateAgentToken failed: %v", err)
+	}
+
+	claims, err := srv.agentTokenService.ValidateAgentToken(token)
+	if err != nil {
+		t.Fatalf("ValidateAgentToken failed: %v", err)
+	}
+
+	if !claims.HasScope(ScopeAgentStatusUpdate) {
+		t.Error("expected ScopeAgentStatusUpdate to be present")
+	}
+	if claims.HasScope(ScopeAgentCreate) {
+		t.Error("expected ScopeAgentCreate NOT to be auto-granted without dev-auth")
+	}
+	if claims.HasScope(ScopeAgentLifecycle) {
+		t.Error("expected ScopeAgentLifecycle NOT to be auto-granted without dev-auth")
 	}
 }

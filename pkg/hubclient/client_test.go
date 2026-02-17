@@ -331,6 +331,32 @@ func TestWithAPIKey(t *testing.T) {
 	}
 }
 
+func TestWithAgentToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Should use X-Scion-Agent-Token header, NOT Authorization: Bearer
+		agentToken := r.Header.Get("X-Scion-Agent-Token")
+		if agentToken != "my-agent-jwt" {
+			t.Errorf("expected X-Scion-Agent-Token 'my-agent-jwt', got %q", agentToken)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		// Verify it does NOT set Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			t.Errorf("expected empty Authorization header, got %q", authHeader)
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(HealthResponse{Status: "ok"})
+	}))
+	defer server.Close()
+
+	client, _ := New(server.URL, WithAgentToken("my-agent-jwt"))
+	_, err := client.Health(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestEnvList(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

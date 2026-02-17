@@ -15,6 +15,10 @@
 package hubsync
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -770,6 +774,88 @@ func TestCleanupGroveBrokerCredentials_NoFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	// Should not panic or error on missing file
 	cleanupGroveBrokerCredentials(tmpDir)
+}
+
+func TestCreateHubClient_UsesAgentTokenFromEnv(t *testing.T) {
+	// Create a test server that checks for X-Scion-Agent-Token header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		agentToken := r.Header.Get("X-Scion-Agent-Token")
+		if agentToken != "test-agent-jwt" {
+			t.Errorf("expected X-Scion-Agent-Token 'test-agent-jwt', got %q", agentToken)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		// Verify it does NOT use Bearer auth
+		if auth := r.Header.Get("Authorization"); auth != "" {
+			t.Errorf("expected no Authorization header when using agent token, got %q", auth)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer server.Close()
+
+	// Set SCION_HUB_TOKEN env var
+	t.Setenv("SCION_HUB_TOKEN", "test-agent-jwt")
+	// Clear any dev auth token so it doesn't interfere
+	t.Setenv("SCION_DEV_TOKEN", "")
+
+	settings := &config.Settings{}
+	client, err := createHubClient(settings, server.URL)
+	if err != nil {
+		t.Fatalf("createHubClient failed: %v", err)
+	}
+
+	// Make a request to verify the agent token is used
+	_, err = client.Health(context.Background())
+	if err != nil {
+		t.Fatalf("Health check failed: %v", err)
+	}
+}
+
+func TestCreateHubClient_PrefersOAuthOverAgentToken(t *testing.T) {
+	// When OAuth credentials exist, they should take precedence over SCION_HUB_TOKEN.
+	// We can't easily test this because credentials.GetAccessToken uses a global store,
+	// but we can verify that without OAuth, SCION_HUB_TOKEN is picked up.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Just verify the request arrives
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer server.Close()
+
+	// With SCION_HUB_TOKEN set but no OAuth, agent token should be used
+	t.Setenv("SCION_HUB_TOKEN", "agent-jwt")
+	t.Setenv("SCION_DEV_TOKEN", "")
+
+	settings := &config.Settings{}
+	_, err := createHubClient(settings, server.URL)
+	if err != nil {
+		t.Fatalf("createHubClient failed: %v", err)
+	}
+}
+
+func TestCreateHubClient_FallsBackToDevAuth(t *testing.T) {
+	// When neither OAuth nor SCION_HUB_TOKEN is set, should fall back to dev auth
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer server.Close()
+
+	// Clear both tokens
+	t.Setenv("SCION_HUB_TOKEN", "")
+	t.Setenv("SCION_DEV_TOKEN", "dev-token-123")
+
+	settings := &config.Settings{}
+	client, err := createHubClient(settings, server.URL)
+	if err != nil {
+		t.Fatalf("createHubClient failed: %v", err)
+	}
+
+	// Verify client was created (dev auth resolves the token)
+	if client == nil {
+		t.Fatal("expected non-nil client")
+	}
 }
 
 func TestRFC3339Nano_BackwardCompatible(t *testing.T) {

@@ -861,20 +861,28 @@ func getEndpoint(settings *config.Settings) string {
 
 // createHubClient creates a new Hub client with proper authentication.
 // Note: hub.token and hub.apiKey are deprecated and no longer used for auth.
-// Auth priority: OAuth credentials > auto dev auth.
+// Auth priority: OAuth credentials > agent token (SCION_HUB_TOKEN) > auto dev auth.
 func createHubClient(settings *config.Settings, endpoint string) (hubclient.Client, error) {
 	var opts []hubclient.Option
 
 	// Add authentication - check in priority order
 	authConfigured := false
 
-	// Check for OAuth credentials from scion hub auth login
+	// 1. Check for OAuth credentials from scion hub auth login
 	if accessToken := credentials.GetAccessToken(endpoint); accessToken != "" {
 		opts = append(opts, hubclient.WithBearerToken(accessToken))
 		authConfigured = true
 	}
 
-	// Fallback to auto dev auth
+	// 2. Check for agent token (running inside a hub-dispatched container)
+	if !authConfigured {
+		if token := os.Getenv("SCION_HUB_TOKEN"); token != "" {
+			opts = append(opts, hubclient.WithAgentToken(token))
+			authConfigured = true
+		}
+	}
+
+	// 3. Fallback to auto dev auth
 	if !authConfigured {
 		opts = append(opts, hubclient.WithAutoDevAuth())
 	}

@@ -332,6 +332,7 @@ type HTTPAgentDispatcher struct {
 	tokenGenerator AgentTokenGenerator
 	secretBackend  secret.SecretBackend
 	hubEndpoint    string // Hub endpoint URL for agents to call back
+	devAuthToken   string // Dev auth token to inject into agent env (dev-auth mode only)
 	debug          bool
 }
 
@@ -366,6 +367,12 @@ func (d *HTTPAgentDispatcher) SetHubEndpoint(endpoint string) {
 // SetSecretBackend sets the secret backend for resolving secrets.
 func (d *HTTPAgentDispatcher) SetSecretBackend(b secret.SecretBackend) {
 	d.secretBackend = b
+}
+
+// SetDevAuthToken sets the dev auth token to inject into agent containers.
+// When set, agents receive SCION_DEV_TOKEN as a fallback authentication method.
+func (d *HTTPAgentDispatcher) SetDevAuthToken(token string) {
+	d.devAuthToken = token
 }
 
 // getBrokerEndpoint retrieves the endpoint URL for a runtime broker.
@@ -487,6 +494,14 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 		if d.debug {
 			slog.Debug("Resolved secrets for agent", "count", len(resolvedSecrets))
 		}
+	}
+
+	// In dev-auth mode, inject the dev token so agents can use it as fallback auth
+	if d.devAuthToken != "" {
+		if req.ResolvedEnv == nil {
+			req.ResolvedEnv = make(map[string]string)
+		}
+		req.ResolvedEnv["SCION_DEV_TOKEN"] = d.devAuthToken
 	}
 
 	return req, nil
