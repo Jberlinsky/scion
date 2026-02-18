@@ -195,6 +195,69 @@ func TestDisplayAgentsHubMode(t *testing.T) {
 	}
 }
 
+func TestDisplayAgentsSortByTime(t *testing.T) {
+	now := time.Now()
+	agents := []api.AgentInfo{
+		{
+			Name:     "old-agent",
+			Template: "default",
+			Runtime:  "docker",
+			Grove:    "my-project",
+			LastSeen: now.Add(-10 * time.Minute),
+		},
+		{
+			Name:     "new-agent",
+			Template: "default",
+			Runtime:  "docker",
+			Grove:    "my-project",
+			LastSeen: now.Add(-1 * time.Minute),
+		},
+		{
+			Name:     "mid-agent",
+			Template: "default",
+			Runtime:  "docker",
+			Grove:    "my-project",
+			LastSeen: now.Add(-5 * time.Minute),
+		},
+	}
+
+	// Enable sort-by-time flag
+	sortByTime = true
+	defer func() { sortByTime = false }()
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := displayAgents(agents, false, false)
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("displayAgents returned error: %v", err)
+	}
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected 4 lines (header + 3 agents), got %d: %s", len(lines), output)
+	}
+
+	// Most recent first: new-agent, mid-agent, old-agent
+	if !strings.Contains(lines[1], "new-agent") {
+		t.Errorf("first agent should be 'new-agent' (most recent), got: %s", lines[1])
+	}
+	if !strings.Contains(lines[2], "mid-agent") {
+		t.Errorf("second agent should be 'mid-agent', got: %s", lines[2])
+	}
+	if !strings.Contains(lines[3], "old-agent") {
+		t.Errorf("third agent should be 'old-agent' (oldest), got: %s", lines[3])
+	}
+}
+
 func TestDisplayAgentsEmpty(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()

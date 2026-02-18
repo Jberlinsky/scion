@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"text/tabwriter"
 	"time"
 
@@ -33,7 +34,8 @@ import (
 )
 
 var (
-	listAll bool
+	listAll    bool
+	sortByTime bool
 )
 
 // listCmd represents the list command
@@ -230,6 +232,12 @@ func hubAgentToAgentInfo(a hubclient.Agent) api.AgentInfo {
 // displayAgents displays agents in the requested format
 // hubMode indicates if the listing is from Hub (shows BROKER column)
 func displayAgents(agents []api.AgentInfo, all bool, hubMode bool) error {
+	if sortByTime {
+		sort.Slice(agents, func(i, j int) bool {
+			return agents[i].LastSeen.After(agents[j].LastSeen)
+		})
+	}
+
 	if outputFormat == "json" {
 		if agents == nil {
 			agents = []api.AgentInfo{}
@@ -465,4 +473,5 @@ func updateAgentNameCache(agents []hubclient.Agent) {
 func init() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().BoolVarP(&listAll, "all", "a", false, "List all agents across all groves")
+	listCmd.Flags().BoolVarP(&sortByTime, "time", "t", false, "Sort by last event, most recent first")
 }
