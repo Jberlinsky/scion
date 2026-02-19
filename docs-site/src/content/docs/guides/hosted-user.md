@@ -60,16 +60,21 @@ The Hub automatically routes tasks to available brokers. You can tag agents to r
 ### Local Fallback
 If you want to temporarily run agents locally even while connected to the Hub, you can use the `--local` flag or set `hub.local_only: true` in your settings.
 
-## Shared Secrets
+## Shared Secrets & Environment
 
-Teams should manage secrets centrally on the Hub instead of sharing `.env` files.
+Teams should manage configuration and secrets centrally on the Hub instead of sharing `.env` files or hardcoding credentials.
 
 ```bash
-# Set a secret for the project
-scion hub secret set OPENAI_API_KEY=sk-...
+# Set an environment variable for the project
+scion hub env set --grove API_URL=https://api.staging.example.com
 
-# Secrets are injected into agents at runtime by the Broker
+# Set a secret for the project
+scion hub secret set --grove OPENAI_API_KEY=sk-...
 ```
+
+Secrets are encrypted and never returned via the API; they are securely injected into agents at runtime by the Runtime Broker.
+
+See the [Secret & Environment Management guide](/guides/secrets) for details on scoping and projection modes.
 
 ## Collaboration
 

@@ -2,7 +2,25 @@
 title: Scion CLI Reference
 ---
 
-## `scion start` (or `run`)
+The Scion CLI is the primary interface for managing agents, groves, and server components.
+
+## Global Flags
+
+These flags are available on all commands:
+
+- `-g, --grove <path>`: Path to a `.scion` grove directory.
+- `--global`: Use the global grove (equivalent to `--grove global`).
+- `-p, --profile <name>`: Configuration profile to use.
+- `--format <string>`: Output format (`json` or `plain`).
+- `--hub <url>`: Hub API endpoint URL (overrides `SCION_HUB_ENDPOINT`).
+- `--no-hub`: Disable Hub integration for this invocation (local-only mode).
+- `-y, --yes`: Skip confirmation prompts.
+- `--non-interactive`: Full non-interactive mode (implies `--yes`, errors on ambiguous prompts).
+- `--debug`: Enable verbose debug output.
+
+## Agent Lifecycle
+
+### `scion start` (or `run`)
 
 Starts a new agent or resumes an existing one.
 
@@ -18,13 +36,13 @@ Starts a new agent or resumes an existing one.
     - `--no-auth`: Disable authentication propagation.
     - `-d, --detached`: Run in detached mode (default true).
 
-## `scion stop`
+### `scion stop`
 
 Stops a running agent.
 
 **Usage:** `scion stop <agent-name>`
 
-## `scion resume`
+### `scion resume`
 
 Resumes a stopped agent.
 
@@ -33,7 +51,7 @@ Resumes a stopped agent.
 - **Flags:**
     - `-a, --attach`: Attach to the agent immediately.
 
-## `scion attach`
+### `scion attach`
 
 Connects to the interactive session of a running agent.
 
@@ -42,7 +60,7 @@ Connects to the interactive session of a running agent.
 - **Key Bindings:**
     - `Ctrl+P, Ctrl+Q`: Detach from the session without stopping the agent.
 
-## `scion message` (or `msg`)
+### `scion message` (or `msg`)
 
 Sends a message to a running agent's harness by enqueuing it into its input stream (requires Tmux).
 
@@ -56,7 +74,7 @@ Sends a message to a running agent's harness by enqueuing it into its input stre
     - `-b, --broadcast`: Send the message to all running agents in the current grove.
     - `-a, --all`: Send the message to all running agents across all groves.
 
-## `scion logs`
+### `scion logs`
 
 Displays the logs of an agent.
 
@@ -65,7 +83,7 @@ Displays the logs of an agent.
 - **Flags:**
     - `-f, --follow`: Stream logs.
 
-## `scion list` (or `ps`)
+### `scion list` (or `ps`)
 
 Lists all agents and their status.
 
@@ -74,7 +92,7 @@ Lists all agents and their status.
 - **Flags:**
     - `-a, --all`: Show all agents (including stopped ones).
 
-## `scion delete` (or `rm`)
+### `scion delete` (or `rm`)
 
 Deletes an agent, removing its container, home directory, and worktree.
 
@@ -84,7 +102,19 @@ Deletes an agent, removing its container, home directory, and worktree.
     - `-b, --preserve-branch`: Preserve the git branch associated with the worktree (default: deleted).
     - `--stopped`: Delete all agents with stopped containers.
 
-## `scion grove`
+### `scion sync`
+
+Synchronizes the agent workspace between the host and the container.
+
+**Usage:** `scion sync [to|from] <agent-name> [flags]`
+
+- **Flags:**
+    - `--dry-run`: Preview changes without syncing.
+    - `--exclude <glob>`: Exclude files matching the pattern.
+
+## Configuration & Workspace
+
+### `scion grove`
 
 Manages the Scion workspace (Grove).
 
@@ -93,7 +123,34 @@ Manages the Scion workspace (Grove).
     - **Note:** If you are in a git repository, add `.scion/agents` to your `.gitignore` to avoid issues with nested git worktrees: `echo ".scion/agents" >> .gitignore`
     - **Hub Integration:** If a Hub endpoint is configured, `init` will prompt to register the new grove with the Hub.
 
-## `scion templates`
+### `scion clean`
+
+Removes the scion grove configuration from the current project or global location.
+
+**Usage:** `scion clean [flags]`
+
+- **Flags:**
+    - `--skip-hub-check`: Skip Hub connectivity check before removing.
+
+### `scion config`
+
+View and modify configuration settings.
+
+- `list`: List all effective settings.
+- `get <key>`: Get a specific configuration value.
+- `set <key> <value>`: Set a configuration value.
+- `validate`: Validate settings files against the schema.
+- `migrate`: Migrate configuration to the latest versioned format.
+
+### `scion cdw`
+
+Change directory to the workspace of an agent.
+
+**Usage:** `scion cdw <agent-name>`
+
+## Template Management
+
+### `scion templates`
 
 Manages agent templates.
 
@@ -101,44 +158,58 @@ Manages agent templates.
 - `show <name>`: Show configuration of a template.
 - `create <name> [--harness <type>]`: Create a new template.
 - `clone <src> <dest>`: Clone a template.
-- `delete <name>` (alias `rm`): Delete a template. Checks both local and Hub for the template and prompts for confirmation before deleting.
-    - If the template exists **locally only**, prompts `Delete local template '<name>'? (Y/n)`.
-    - If the template exists **on the Hub only**, prompts `Delete remote template '<name>'? (Y/n)`.
-    - If the template exists **both locally and on the Hub**, presents a choice: `[L]` local, `[R]` remote, `[B]` both, `[C]` cancel.
-    - Use `--yes` / `-y` to skip confirmation (deletes both when template exists in both locations).
-    - Use `--no-hub` to skip the Hub check and treat as local-only.
+- `delete <name>` (alias `rm`): Delete a template.
+- `import <source>`: Import agent definitions (from Claude/Gemini) as templates.
 - `update-default`: Update default templates from the binary.
 
-## `scion hub`
+## Hub Integration
+
+### `scion hub`
 
 Manages connection to and interaction with a Scion Hub.
 
-- `scion hub status`: Show the current Hub connection status and authentication details.
-    - Flags: `--json` (Output in JSON format)
+- `scion hub status`: Show the current Hub connection status.
 - `scion hub auth login`: Authenticate against the Hub (opens a browser).
-- `scion hub link`: Link the current local grove to the Hub. Matches by git remote or name.
+- `scion hub link`: Link the current local grove to the Hub.
 - `scion hub unlink`: Unlink the current grove from the Hub locally.
-- `scion hub enable`: Enable Hub integration for agent operations.
-- `scion hub disable`: Disable Hub integration, falling back to local-only mode.
 - `scion hub groves`: List all groves registered on the Hub.
-    - `info [name]`: Show detailed information for a grove.
-    - `delete [name]`: Delete a grove from the Hub.
 - `scion hub brokers`: List all runtime brokers registered on the Hub.
-- `scion hub secret`: Manage secrets on the Hub.
-    - `set <key>=<value>`: Set a secret for the current grove.
-    - `list`: List secrets for the current grove.
-    - `remove <key>`: Remove a secret.
+- `scion hub secret`: Manage write-only secrets on the Hub.
+    - `set <key> <value>`: Set a secret.
+    - `get [key]`: Get secret metadata.
+    - `clear <key>`: Remove a secret.
+- `scion hub env`: Manage environment variables on the Hub.
+    - `set <key>=<value>`: Set a variable.
+    - `get [key]`: Get variable values.
+    - `clear <key>`: Remove a variable.
 
-## `scion broker`
+## Infrastructure
+
+### `scion broker`
 
 Manages the local host as a Runtime Broker.
 
-- `scion broker status`: Show status of the local broker server and Hub registration.
+- `scion broker status`: Show status of the local broker server.
 - `scion broker start`: Start the broker server as a background daemon.
-    - Flags: `--foreground` (Run in current terminal), `--port` (Custom API port).
 - `scion broker stop`: Stop the broker daemon.
 - `scion broker register`: Register this host as a Runtime Broker with the Hub.
 - `scion broker deregister`: Remove this broker's registration from the Hub.
-- `scion broker provide`: Add this broker as a provider for a grove (enables agent execution for that grove).
+- `scion broker provide`: Add this broker as a provider for a grove.
 - `scion broker withdraw`: Remove this broker as a provider from a grove.
+
+### `scion server`
+
+Manages Scion server components (Hub and Broker).
+
+- `scion server start`: Start one or more server components.
+    - Flags: `--enable-hub`, `--enable-runtime-broker`, `--port`, `--db`, `--dev-auth`.
+
+## Miscellaneous
+
+### `scion version`
+
+Prints the Scion version information.
+
+**Usage:** `scion version`
+
 

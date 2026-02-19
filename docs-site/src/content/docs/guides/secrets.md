@@ -1,19 +1,103 @@
 ---
-title: Secret Management
-description: Managing secrets and sensitive credentials via the Scion Hub.
+title: Secret & Environment Management
+description: Managing environment variables and secrets via the Scion Hub.
 ---
 
-Scion provides a typed secret management system for securely storing and projecting sensitive data (API keys, credentials, certificates) into agent containers. Secrets are managed centrally through the Hub and resolved at agent startup.
+Scion's hosted architecture provides a centralized way to manage configuration and sensitive data across your team. Instead of sharing `.env` files or hardcoding credentials, you can use the Scion Hub to store and inject environment variables and secrets into your agents.
 
-## Secrets Backend (Required)
+## Variables vs. Secrets
 
-Scion requires a production secrets backend to store secret values. The recommended backend is **GCP Secret Manager**.
+Scion distinguishes between regular environment variables and secure secrets:
+
+| Feature | Environment Variables (`env`) | Secrets (`secret`) |
+| :--- | :--- | :--- |
+| **Visibility** | Read/Write (via API and CLI) | Write-only (cannot be read back) |
+| **Storage** | Plaintext in database | Encrypted at rest / Externally stored |
+| **Use Case** | API URLs, log levels, feature flags | API keys, passwords, private keys |
+| **Injection** | Environment variables only | Environment, files, or JSON variables |
+
+---
+
+## Scoping
+
+Both variables and secrets can be scoped to different levels. Scion resolves these hierarchically when an agent starts:
+
+1.  **User Scope**: Personal secrets for a specific user. Applied to all agents owned by that user.
+2.  **Grove Scope**: Project-level secrets. Available to all agents running in a specific Grove.
+3.  **Broker Scope**: Infrastructure-level secrets. Available only to agents running on a specific Runtime Broker (e.g., for hardware-specific config).
+
+**Resolution Priority:** User secrets have the highest priority, followed by Grove, then Broker, and finally Template/Agent overrides. Higher-priority scopes override lower ones.
+
+---
+
+## Managing Environment Variables
+
+Use the `scion hub env` command suite to manage non-sensitive configuration.
+
+### Setting Variables
+```bash
+# Set a user-scoped variable
+scion hub env set API_URL=https://api.example.com
+
+# Set a grove-scoped variable (inferred from current directory)
+scion hub env set --grove LOG_LEVEL=debug
+
+# Set a variable only for a specific broker
+scion hub env set --broker=my-gpu-node CUDA_VISIBLE_DEVICES=0
+```
+
+### Injection Modes
+- **As Needed (Default)**: The variable is only injected if it is explicitly requested in the agent's template (`scion-agent.yaml`).
+- **Always**: The variable is injected into *every* agent started within that scope.
+  ```bash
+  scion hub env set --always GLOBAL_TRACE_ID=scion-production
+  ```
+
+---
+
+## Managing Secrets
+
+Secrets are write-only. Once set, their values cannot be retrieved via the CLI or API; they are only decrypted and injected into the agent container at runtime.
+
+### Setting Secrets
+```bash
+# Set a user-scoped secret
+scion hub secret set ANTHROPIC_API_KEY sk-ant-api01-...
+
+# Set a grove-scoped secret
+scion hub secret set --grove DB_PASSWORD my-secure-password
+```
+
+### Secret Types
+Secrets can be projected into the agent container in three ways:
+
+1.  **Environment** (Default): Injected as a standard environment variable.
+2.  **File**: Written to a specific path on the agent's filesystem.
+3.  **Variable**: Added to a JSON file at `~/.scion/secrets.json` for programmatic access by the harness.
+
+### Mounting Files as Secrets
+You can use the `@` prefix to read a secret's value from a local file. This is particularly useful for SSH keys or service account JSONs.
+
+```bash
+# Upload an SSH private key and mount it to the standard location in the agent
+scion hub secret set --type file --target ~/.ssh/id_rsa SSH_KEY @~/.ssh/id_rsa
+```
+
+---
+
+## Administrator Configuration (Hub)
+
+To use secrets in production, the Hub must be configured with a production-grade secrets backend.
+
+### Secrets Backend (Required)
+
+Scion requires a secrets backend to store secret values. The recommended backend is **GCP Secret Manager**.
 
 :::caution[No Plaintext Storage]
 The Hub does not store secret values in its database. Attempting to create or update secrets without a configured backend (e.g., using the default `local` backend) will return an error. You must configure GCP Secret Manager to use secret management features.
 :::
 
-### Configuring GCP Secret Manager
+#### Configuring GCP Secret Manager
 
 Set the backend in your `settings.yaml`:
 
@@ -37,83 +121,19 @@ When GCP Secret Manager is configured, Scion uses a **hybrid storage** model:
 - **Metadata** (name, type, scope) is stored in the Hub database.
 - **Secret values** are stored in GCP Secret Manager with automatic versioning.
 
-## Secret Types
+---
 
-Secrets are typed to control how they are projected into agent containers:
+## Technical Details
 
-| Type | Projection | Description |
-| :--- | :--- | :--- |
-| `environment` | Environment variable | Injected as an env var (default). |
-| `variable` | `~/.scion/secrets.json` | Written to a JSON file for programmatic access. |
-| `file` | Filesystem path | Written to a specific file path (e.g., TLS certs). Max 64 KiB. |
+### Resolution Hierarchy
+When an agent starts, the Runtime Broker requests a "Resolved Environment" from the Hub. The Hub merges values in this order (last one wins):
+1. Broker Secrets/Env
+2. Grove Secrets/Env
+3. User Secrets/Env
+4. Template `env` block
+5. CLI `--env` flags
 
-## Secret Scopes
-
-Secrets are scoped to control their visibility. When an agent starts, secrets are resolved from all applicable scopes and merged, with higher-priority scopes overriding lower ones.
-
-| Scope | Priority | Description |
-| :--- | :--- | :--- |
-| `user` | Lowest | Personal secrets for a specific user. Applied to all agents owned by that user. |
-| `grove` | Medium | Project-level secrets. Applied to all agents in the grove. |
-| `runtime_broker` | Highest | Infrastructure-level secrets. Applied to all agents on a specific broker. |
-
-**Override example:** If a user defines `API_KEY=user-key` and the grove defines `API_KEY=grove-key`, agents in that grove will receive `grove-key`.
-
-## Managing Secrets
-
-### Via the CLI
-
-```bash
-# Set a user-scoped secret
-scion hub secret set API_KEY --value "sk-live-..."
-
-# Set a grove-scoped secret
-scion hub secret set DB_PASSWORD --scope grove --scope-id <grove-id> --value "..."
-
-# Set a file-type secret (e.g., TLS certificate)
-scion hub secret set TLS_CERT --type file --target /etc/ssl/cert.pem --value "$(cat cert.pem)"
-
-# List secrets (metadata only, values are never exposed)
-scion hub secret list
-
-# Delete a secret
-scion hub secret delete API_KEY
-```
-
-### Via the API
-
-```bash
-# Set a secret
-curl -X PUT https://hub.example.com/api/v1/secrets/API_KEY \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"value": "sk-live-...", "type": "environment", "scope": "grove", "scopeId": "grove-123"}'
-
-# List secrets for a grove
-curl https://hub.example.com/api/v1/groves/grove-123/secrets \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-## How Secrets Reach Agents
-
-When an agent is dispatched to a Runtime Broker:
-
-1. The Hub resolves all applicable secrets (merging user, grove, and broker scopes).
-2. Resolved secrets are included in the `CreateAgent` command sent to the broker over the TLS-secured control channel.
-3. The broker projects secrets into the agent container based on their type:
-   - `environment` secrets become environment variables.
-   - `variable` secrets are written to `~/.scion/secrets.json`.
-   - `file` secrets are written to the specified target path.
-4. When the agent is deleted, all projected secrets are purged.
-
-Brokers never persist agent secrets to disk. Secrets exist only in the agent's container memory for the duration of its lifecycle.
-
-## Security Considerations
-
-- **Values are never returned** by the Hub API. Only metadata (name, type, scope, version) is exposed.
-- **Transport security**: Secrets are transmitted over TLS between the Hub and Runtime Brokers.
-- **API keys** (used for programmatic Hub access) are stored as SHA-256 hashes only -- the original key value cannot be recovered.
-- **Broker join tokens** are hashed before storage and expire after one hour.
-- **Broker shared secrets** (for HMAC authentication) are stored as binary blobs in the Hub database and are established during the broker registration flow.
+### Security
+Secrets are transmitted over TLS between the Hub and Runtime Brokers. They are only decrypted by the Hub during the dispatch process and sent over an encrypted channel to the Runtime Broker. The Broker then injects them directly into the container's memory space. Brokers never persist agent secrets to disk.
 
 For a detailed overview of the security architecture, see the [Security Architecture Reference](/reference/security).

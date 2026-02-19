@@ -12,33 +12,32 @@ Scion documentation must navigate three primary dimensions:
 | **Operational Mode** | Solo (Local-only, zero-config), Hosted (Distributed, Hub-centric) |
 | **Interface** | CLI (Primary), Web Dashboard (Visualization & Control) |
 
-Note no one variant within a dimension has supremecy over another.
+Note no one variant within a dimension has supremacy over another.
 
-## 2. Proposed Content Architecture
+## 2. Content Architecture
 
 The documentation is organized into five functional pillars. The "Intersection" of dimensions is handled by grouping guides by **Persona** and then branching by **Mode**.
 
 ### I. Foundations (Everyone)
 *   **Overview**: High-level value proposition.
 *   **Core Concepts**: Universal primitives (Grove, Harness, Profile, Runtime, Agent).
+*   **Supported Harnesses**: List of available LLM harnesses.
 *   **Glossary**: Standardized terminology.
 
 ### II. Developer's Guide (End Users)
 *   **Solo Workflow (The "Local" Path)**:
     *   Installation & Quick Start.
-    *   Managing local agents and workspaces.
-    *   Customizing templates.
+    *   Workspace Management.
+    *   Local Configuration (`settings.json`).
 *   **Hosted Workflow (The "Team" Path)**:
     *   Connecting to a Scion Hub.
     *   Using the Web Dashboard.
-    *   Managing environment variables and secrets via the Hub.
+    *   Secret Management (Hub-based).
 *   **How To (Shared)**:
-    *   Working with Templates & Harnesses (The new agnostic model).
-    *   Interactive sessions (Attach & Message).
-    *   Observability (Logs & Monitoring).
+    *   Working with Templates & Harnesses.
+    *   Interactive sessions (Tmux/Attach).
 
 ### III. Administrator's Guide (Ops/Admins)
-*   **Local Governance**: Detailed `settings.json` configuration and environment variable substitution.
 *   **Infrastructure Deployment**:
     *   Setting up the Scion Hub (Persistence, Web Server).
     *   Provisioning Runtime Brokers (Docker, Podman, Apple Virtualization).
@@ -46,18 +45,18 @@ The documentation is organized into five functional pillars. The "Intersection" 
 *   **Security & Identity**:
     *   Authentication flows (OAuth vs. Dev Auth).
     *   Permissions & Policy design.
-*   **Operations**: Metrics collection and OpenTelemetry forwarding.
+*   **Operations**:
+    *   Observability (Logs & Monitoring).
+    *   Metrics collection.
 
 ### IV. Contributor's Guide (Developers)
 *   **Architecture Deep Dive**: Internal component interactions.
-*   **Harness Development**: How to add support for new LLM tools.
-*   **Runtime Development**: Implementing new execution backends.
+*   **Development Guides**: Local logging, etc.
 *   **Design Catalog**: Historical and future design specifications (mirrored from `.design/`).
 
 ### V. Technical Reference (Everyone)
-*   **CLI Reference**: Generated command documentation.
+*   **CLI Reference**: Generated command documentation (under `reference/cli/`).
 *   **API Reference**: Hub and Runtime Broker REST/WebSocket specifications.
-*   **Configuration Schemas**: `settings.json` and `scion-agent.json` field definitions.
 
 ## 3. Handling the Intersections
 
@@ -72,37 +71,61 @@ The documentation is organized into five functional pillars. The "Intersection" 
 
 ## 4. Starlight Sidebar Configuration
 
-The `astro.config.mjs` sidebar should be updated to reflect this hierarchy:
+The `astro.config.mjs` sidebar reflects this hierarchy. When adding new files, ensure they are registered in the sidebar:
 
 ```javascript
 sidebar: [
-  { label: 'Foundations', items: ['overview', 'concepts', 'supported-harnesses'] },
-  {
-    label: 'Developer Guide',
-    items: [
-      { label: 'Local Workflow', items: ['install', 'guides/workspace'] },
-      { label: 'Team Workflow', items: ['guides/hosted-user'] }, // To be created
-      { label: 'How To', items: ['guides/templates', 'guides/tmux'] },
-    ],
-  },
-  {
-    label: 'Operations & Hosting',
-    items: [
-      { label: 'Hub Setup', items: ['guides/hub-server'] }, // To be created
-      { label: 'Runtimes', items: ['guides/kubernetes'] },
-      { label: 'Security', items: ['guides/auth'] }, // To be created
-    ],
-  },
-  { label: 'Reference', autogenerate: { directory: 'reference' } },
-  { label: 'Contributing', autogenerate: { directory: 'contributing' } },
+    {
+        label: 'Foundations',
+        items: [
+            { label: 'Overview', slug: 'overview' },
+            { label: 'Core Concepts', slug: 'concepts' },
+            // ...
+        ],
+    },
+    {
+        label: 'Developer Guide',
+        items: [
+            {
+                label: 'Local Workflow',
+                items: [ /* ... */ ],
+            },
+            {
+                label: 'Team Workflow',
+                items: [ /* ... */ ],
+            },
+            // ...
+        ],
+    },
+    // ...
 ]
 ```
 
 ## 5. Curation Standards
 
 1.  **Code-First Truth**: Documentation should be updated in the same PR as the feature implementation.
-2.  **Persona-Specific Tone**:
+2.  **Source of Truth**:
+    *   Always check `.design/` for architectural intent.
+    *   Consult `pkg/` for implementation details.
+    *   Verify CLI flags in `cmd/`.
+3.  **Persona-Specific Tone**:
     *   *User docs* should be practical and task-oriented.
-    *   *Admin docs* should be technical and detail-oriented regarding side effects.
+    *   *Admin docs* should be technical and detail-oriented.
     *   *Reference docs* should be exhaustive and dry.
-3.  **Cross-Linking**: Always link from high-level guides to specific references (e.g., "Set the model in your config [see Reference]") to avoid content duplication.
+4.  **Diagrams**: Use **D2** for all diagrams. Include them in `d2` code blocks within Markdown files.
+5.  **Cross-Linking**: Link from high-level guides to specific references to avoid duplication.
+
+## 6. Agent Workflow & Verification
+
+### Status Reporting
+Before asking the user a question or completing a task, use the following commands to update the agent's status:
+
+*   **Asking User**: `sciontool status ask_user "<question>"`
+*   **Task Completed**: `sciontool status task_completed "<task title>"`
+
+### Verification Steps
+*   **Link Check**: Ensure all relative links between documents are valid.
+*   **Sidebar Verification**: Ensure new pages are added to `docs-site/astro.config.mjs`.
+*   **Formatting**: Use standard Markdown. Starlight supports [Callouts](https://starlight.astro.build/guides/authoring-content/#asides) (Note, Tip, Caution, Danger).
+
+**Note on D2**: The `d2` CLI may not be available in all environments. If you cannot run `./check-d2.sh`, ensure your D2 syntax is correct according to [D2 documentation](https://d2lang.com/tour/intro).

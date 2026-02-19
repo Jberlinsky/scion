@@ -17,11 +17,11 @@ Scion is a container-based orchestration tool designed to manage concurrent LLM-
 
 Scion uses a flexible configuration system based on **Profiles**, **Runtimes**, and **Harnesses**. This allows you to define different environments (e.g., local Docker vs. remote Kubernetes) and switch between them easily.
 
-- **Global Settings**: `~/.scion/settings.json`
-- **Grove Settings**: `.scion/settings.json` (Project overrides)
+- **Global Settings**: `~/.scion/settings.yaml` (User-wide defaults)
+- **Grove Settings**: `.scion/settings.yaml` (Project overrides)
 
-For detailed information on configuring Scion, see the [Settings Reference](settings.md) and [Agent Configuration Reference](reference/scion-config-reference.md).
-To learn about the different agent tools supported by Scion, see [Supported Harnesses](supported-harnesses.md).
+For detailed information on configuring Scion, see the [Orchestrator Settings Reference](/reference/orchestrator-settings) and [Agent Configuration Reference](/reference/agent-config).
+To learn about the different agent tools supported by Scion, see [Supported Harnesses](/supported-harnesses).
 
 ## Getting Started
 

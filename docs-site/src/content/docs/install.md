@@ -32,7 +32,7 @@ Scion requires a container runtime to manage agents. You can use either Docker o
 ### 3. Git
 Scion uses `git worktree` to manage agent workspaces.
 - Ensure `git` is installed and available in your PATH.
-- Because Scion uses a new feature for relative path worktrees ensure that `git --version` >= 2.48
+- Because Scion uses a new feature for relative path worktrees, ensure that `git --version` >= 2.47.0.
 
 For Ubuntu you can install the latest version with
 

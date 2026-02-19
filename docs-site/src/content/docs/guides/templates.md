@@ -96,6 +96,9 @@ scion templates create my-new-role
 # Clone an existing template
 scion templates clone code-reviewer my-custom-reviewer
 
+# Import definitions from Claude or Gemini sub-agents
+scion templates import .claude/agents/code-reviewer.md
+
 # Delete a template
 scion templates delete my-old-template
 ```
