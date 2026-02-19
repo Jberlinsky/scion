@@ -525,5 +525,72 @@ scion agent start --name test-agent
 ## Non-Goals
 
 - **NATS JetStream / persistence.** The publisher uses core NATS pub/sub. Message persistence is not needed because the web frontend fetches the full state snapshot on load and SSE reconnects restart from the current state, not from a historical offset.
-- **Agent harness event relay.** Heavy events (`agent.{id}.event`) from the harness status stream are not part of this design. Those require a separate pipeline from the Runtime Broker's status monitor to NATS. This design covers Hub-originated state changes only.
+- **Agent harness event relay.** Heavy events (`agent.{id}.event`) from the harness status stream are not part of this design. Those require a separate pipeline from the Runtime Broker's status monitor to NATS. This design covers Hub-originated state changes only. See Open Question 2 below.
 - **NATS as a message bus for inter-service communication.** NATS is used strictly for fan-out notifications to the web frontend. The Hub-to-Broker communication continues to use the existing HTTP/WebSocket control channel.
+
+---
+
+## Open Questions
+
+### 1. Dashboard grove summaries (`grove.*.summary`)
+
+The client `StateManager` subscribes to `grove.*.summary` for the dashboard view, but this design only covers event-driven publishes triggered by state changes. Periodic grove summary aggregation (agent counts per grove, overall status rollups) requires a separate publishing mechanism — likely a timer loop in the Hub that queries the store and publishes a summary for each grove at a fixed interval (e.g., every 30s).
+
+**Options:**
+- **(a)** Add a periodic summary publisher goroutine to this design.
+- **(b)** Defer summaries; the dashboard can use the existing REST API for initial load and rely on `grove.{id}.agent.*` events for incremental updates (requires client-side aggregation logic).
+- **(c)** Publish summaries reactively — recompute and publish a grove summary whenever any agent event occurs in that grove, debounced to avoid flooding.
+
+### 2. Harness event relay (`agent.{id}.event`)
+
+The frontend's `state.ts` handles `agent.{agentId}.event` subjects for agent detail views (tool use, thinking, harness output — heavy events up to 10 KB). These originate from the Runtime Broker's status monitor watching container output. The question is how they reach NATS:
+
+**Options:**
+- **(a) Broker publishes to NATS directly.** The Runtime Broker gets its own NATS client and publishes `agent.{id}.event` to NATS. Simple, but means the broker also needs NATS configuration, and there are now two NATS publishers to coordinate.
+- **(b) Broker → Hub → NATS.** The broker relays heavy events to the Hub via the existing WebSocket control channel or a new HTTP endpoint, and the Hub publishes them to NATS. Centralizes all NATS publishing but adds latency and Hub load for high-volume harness output.
+- **(c) Defer to a separate design.** This design covers Hub-originated state changes only. Harness event relay is a distinct pipeline with different performance characteristics (high volume, large payloads, low latency requirements) and warrants its own design document.
+
+### 3. NATS server deployment topology
+
+The web BFF subscribes to NATS, the Hub publishes to NATS — both must connect to the same server. The design doesn't specify where the NATS server runs.
+
+**Options:**
+- **(a) External NATS server.** Deployed separately via Docker, systemd, or managed service. Simplest operationally for production; requires an extra process for local dev (`docker run nats:latest`).
+- **(b) Embedded NATS server in the Hub.** Using `github.com/nats-io/nats-server/v2/server` as a library, the Hub starts an in-process NATS server when `--nats-embedded` is set. Eliminates an external dependency for single-node deployments at the cost of additional binary size and operational coupling.
+- **(c) Both.** Embedded for single-node / dev mode, external for production. The `--nats-url` flag points to an external server; `--nats-embedded` starts one in-process and ignores `--nats-url`.
+
+#### Binary size impact of embedded NATS
+
+Measured against the current scion binary:
+
+| Component | Standalone size | New module deps for scion |
+|-----------|----------------|---------------------------|
+| Current scion binary | 113 MB | — |
+| `nats.go` client only | 8 MB | 3 (`nats.go`, `nkeys`, `nuid`) |
+| `nats-server` embedded | 20 MB | 11 (adds `jwt/v2`, `go-tpm`, `go-tpm-tools`, `highwayhash`, `automaxprocs`, etc.) |
+
+The actual delta on the scion binary would be smaller than the standalone numbers because shared dependencies like `golang.org/x/crypto` and `golang.org/x/sys` are already in the dependency tree. Estimates:
+
+- **Client only:** ~5–6 MB added (~5% increase)
+- **Embedded server:** ~15–17 MB added (~14% increase)
+
+The embedded server pulls in heavier transitive dependencies (`go-tpm` for TPM hardware auth, `antithesis-sdk-go` for fault injection) that aren't needed for a simple embedded use case, but Go links them regardless. At 113 MB baseline, the ~15% increase is proportionally modest.
+
+### 4. Missing `grove.{groveId}.created` event
+
+The design includes `grove.updated` and `grove.deleted` but not `grove.created`. If a user is on the dashboard and a new grove is created, they wouldn't see it without a page refresh. This should likely be added for consistency:
+
+| Subject | Trigger | Payload |
+|---------|---------|---------|
+| `grove.{groveId}.created` | Grove created | `GroveCreatedEvent` |
+
+The dashboard subscription (`grove.*.summary`) would not match `grove.{id}.created` since `*` only matches single tokens, not multi-level. A dashboard subscriber would need `grove.>` to catch grove creation events, or the client could poll groves on a timer as a simpler alternative.
+
+### 5. Config naming: `SCION_SERVER_NATS_URL` vs `SCION_NATS_URL`
+
+The web frontend uses `SCION_NATS_URL` / `NATS_URL` for its subscriber connection. The Hub design uses `SCION_SERVER_NATS_URL` following the `SCION_SERVER_*` prefix convention for Hub configuration. Both typically point at the same NATS server.
+
+**Options:**
+- **(a) Keep separate prefixes.** `SCION_SERVER_NATS_URL` for the Hub, `SCION_NATS_URL` for the web BFF. They're different processes with different config namespaces, even though the value is usually the same. Explicit and consistent with existing patterns.
+- **(b) Shared `SCION_NATS_URL`.** Both the Hub and web BFF read `SCION_NATS_URL`. Simpler for deployment (one env var), but breaks the `SCION_SERVER_*` convention for Hub config and could cause confusion if the Hub and BFF need different NATS servers in the future.
+- **(c) Hub reads both.** The Hub checks `SCION_SERVER_NATS_URL` first, then falls back to `SCION_NATS_URL`. Pragmatic for single-node deployments while preserving the ability to override per-component.
