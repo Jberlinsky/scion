@@ -167,47 +167,51 @@ func TestUpdateDefaultTemplates(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Override home dir
+	// Override home dir so global dir resolves to tmpDir
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", origHome)
 
-	// Create a mock project structure
-	projectDir := filepath.Join(tmpDir, "project", DotScion)
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
-		t.Fatal(err)
+	globalDefaultDir := filepath.Join(tmpDir, DotScion, "templates", "default")
+	defaultScionYAML := filepath.Join(globalDefaultDir, "scion-agent.yaml")
+
+	// First call: no existing default template, should succeed without force
+	if err := UpdateDefaultTemplates(false, GetMockHarnesses()); err != nil {
+		t.Fatalf("expected first update to succeed, got: %v", err)
 	}
 
-	// Helper to change current working directory
-	origWd, _ := os.Getwd()
-	defer os.Chdir(origWd)
-	if err := os.Chdir(filepath.Dir(projectDir)); err != nil {
-		t.Fatal(err)
+	// Verify the default agnostic template was created
+	data, err := os.ReadFile(defaultScionYAML)
+	if err != nil {
+		t.Fatalf("expected scion-agent.yaml to exist after update: %v", err)
+	}
+	originalContent := string(data)
+	if originalContent == "" {
+		t.Fatal("expected scion-agent.yaml to have content")
 	}
 
-	// Initialize project (creates empty templates/ dir, no default template)
-	if err := InitProject("", GetMockHarnesses()); err != nil {
-		t.Fatal(err)
+	// Second call without force: should fail because default already exists
+	err = UpdateDefaultTemplates(false, GetMockHarnesses())
+	if err == nil {
+		t.Fatal("expected error when updating existing default without force, got nil")
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("expected error to mention --force, got: %v", err)
 	}
 
-	defaultScionYAML := filepath.Join(projectDir, "templates", "default", "scion-agent.yaml")
-
-	// Manually create and corrupt the default template file
+	// Corrupt the file to verify force actually overwrites
 	corruptContent := "CORRUPT"
-	if err := os.MkdirAll(filepath.Dir(defaultScionYAML), 0755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(defaultScionYAML, []byte(corruptContent), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Update default templates
-	if err := UpdateDefaultTemplates(false, GetMockHarnesses()); err != nil {
-		t.Fatalf("failed to update default templates: %v", err)
+	// Third call with force: should succeed and overwrite
+	if err := UpdateDefaultTemplates(true, GetMockHarnesses()); err != nil {
+		t.Fatalf("expected force update to succeed, got: %v", err)
 	}
 
 	// Verify the default agnostic template was restored
-	data, err := os.ReadFile(defaultScionYAML)
+	data, err = os.ReadFile(defaultScionYAML)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -617,11 +617,16 @@ func cloneFromHubTemplate(hubCtx *HubContext, match *TemplateMatch, destName str
 
 var templatesUpdateDefaultCmd = &cobra.Command{
 	Use:   "update-default",
-	Short: "Update default templates with the latest from the binary",
+	Short: "Update the global default template with the latest from the binary",
+	Long: `Updates the default template in the global grove (~/.scion/templates/default)
+with the latest embedded defaults from the scion binary.
+
+If the default template already exists, a warning is printed and no changes
+are made. Use --force to overwrite the existing default template.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		global, _ := cmd.Flags().GetBool("global")
+		force, _ := cmd.Flags().GetBool("force")
 		harnesses := harness.All()
-		err := config.UpdateDefaultTemplates(global, harnesses)
+		err := config.UpdateDefaultTemplates(force, harnesses)
 		if err != nil {
 			return err
 		}
@@ -1136,6 +1141,9 @@ func init() {
 	templatesCmd.AddCommand(templatesSyncCmd)
 	templatesCmd.AddCommand(templatesPushCmd)
 	templatesCmd.AddCommand(templatesPullCmd)
+
+	// Flags for update-default command
+	templatesUpdateDefaultCmd.Flags().Bool("force", false, "Overwrite the existing default template")
 
 	// Flags for show command
 	templatesShowCmd.Flags().Bool("local", false, "Only search local filesystem")

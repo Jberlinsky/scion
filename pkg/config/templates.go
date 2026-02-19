@@ -359,35 +359,29 @@ func CloneTemplate(srcName, destName string, global bool) error {
 	return nil
 }
 
-func UpdateDefaultTemplates(global bool, harnesses []api.Harness) error {
-	var templatesDir string
-	var harnessConfigsDir string
-	var err error
+func UpdateDefaultTemplates(force bool, harnesses []api.Harness) error {
+	globalDir, err := GetGlobalDir()
+	if err != nil {
+		return err
+	}
 
-	if global {
-		templatesDir, err = GetGlobalTemplatesDir()
-		if err != nil {
-			return err
+	templatesDir, err := GetGlobalTemplatesDir()
+	if err != nil {
+		return err
+	}
+	harnessConfigsDir := filepath.Join(globalDir, harnessConfigsDirName)
+
+	defaultDir := filepath.Join(templatesDir, "default")
+
+	// Check if the default template already exists
+	if !force {
+		if _, err := os.Stat(defaultDir); err == nil {
+			return fmt.Errorf("default template already exists at %s; use --force to overwrite", defaultDir)
 		}
-		globalDir, err := GetGlobalDir()
-		if err != nil {
-			return err
-		}
-		harnessConfigsDir = filepath.Join(globalDir, harnessConfigsDirName)
-	} else {
-		templatesDir, err = GetProjectTemplatesDir()
-		if err != nil {
-			return err
-		}
-		projectDir, err := GetProjectDir()
-		if err != nil {
-			return err
-		}
-		harnessConfigsDir = filepath.Join(projectDir, harnessConfigsDirName)
 	}
 
 	// Update default agnostic template
-	if err := SeedAgnosticTemplate(filepath.Join(templatesDir, "default"), true); err != nil {
+	if err := SeedAgnosticTemplate(defaultDir, true); err != nil {
 		return err
 	}
 
