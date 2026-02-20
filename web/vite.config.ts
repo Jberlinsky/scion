@@ -33,6 +33,11 @@ function mockApiPlugin(): Plugin {
                     res.end(JSON.stringify({ google: true, github: true }));
                     return;
                 }
+                if (req.url === '/auth/debug') {
+                    res.statusCode = 404;
+                    res.end();
+                    return;
+                }
                 if (req.url?.startsWith('/api/')) {
                     res.setHeader('Content-Type', 'application/json');
                     res.statusCode = 200;
