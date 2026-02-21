@@ -134,7 +134,7 @@ If a grove has multiple brokers with different local environments, a user might 
 
 ## 7. Implementation Record
 
-The MVP was implemented across 5 commits on the `env-gather` branch.
+The MVP was implemented across 5 commits on the `env-gather` branch, with 2 follow-up commits for bug fixes and enhancements.
 
 ### 7.1 Shared Types and Interface Methods (`30ced2c`)
 
@@ -200,23 +200,58 @@ If `needs` is empty, the agent starts immediately (HTTP 201, existing fast path)
 
 ### 7.5 Tests (`9420899`)
 
-**Broker tests** (`pkg/runtimebroker/handlers_envgather_test.go`, 5 tests):
+**Broker tests** (`pkg/runtimebroker/handlers_envgather_test.go`, 8 tests):
 - `TestEnvGather_AllSatisfied` — all required keys provided by Hub; agent starts immediately (201).
 - `TestEnvGather_NeedsKeys` — Hub provides one key, another is missing; Broker returns 202 with categorized keys.
 - `TestEnvGather_BrokerHasKey` — required key exists in Broker's own `os.Getenv()`; agent starts (201).
 - `TestEnvGather_FinalizeEnv` — two-phase flow: 202, then finalize-env with gathered values; agent starts (201).
 - `TestEnvGather_NoGatherFlag` — `GatherEnv=false` skips env evaluation entirely; agent starts (201).
+- `TestEnvGather_HarnessAware` — harness-config directory on disk without settings `harness_configs.env`; broker detects `ANTHROPIC_API_KEY` as needed via harness `RequiredEnvKeys()` (202).
+- `TestEnvGather_GeminiAuthType` — gemini harness with `auth_selected_type: vertex-ai` requires `GOOGLE_CLOUD_PROJECT` instead of `GEMINI_API_KEY` (202).
+- `TestEnvGather_SettingsAuthTypeOverride` — settings profile `harness_overrides` overrides on-disk `auth_selected_type` from `gemini-api-key` to `oauth-personal`; no env keys required, agent starts (201).
 
-**Hub tests** (`pkg/hub/envgather_test.go`, 7 tests):
+**Hub tests** (`pkg/hub/envgather_test.go`, 8 tests):
 - `TestEnvGather_HubDispatch_AllSatisfied` — dispatcher with all env satisfied returns nil requirements.
 - `TestEnvGather_HubDispatch_NeedsGather` — dispatcher relays broker's env requirements correctly.
 - `TestEnvGather_HubDispatch_FinalizeEnv` — dispatcher forwards gathered env to broker.
 - `TestEnvGather_HubHandler_202Response` — full handler test: `GatherEnv=true` request produces HTTP 202 with `EnvGather` in response body.
+- `TestEnvGather_HubHandler_GroveRoute_202Response` — env-gather via the grove-scoped route (`/api/v1/groves/{groveId}/agents`); verifies `DispatchAgentCreateWithGather` is called and 202 response includes `EnvGather`.
 - `TestEnvGather_HubHandler_SubmitEnv` — submit endpoint accepts gathered env, forwards to broker, updates agent status to running.
 - `TestEnvGather_HubHandler_SubmitEnv_InvalidState` — submit rejected with 409 when agent is not in provisioning state.
 - `TestEnvGather_HubEnvResolution` — Hub resolves grove-scoped env vars from storage and includes them in `ResolvedEnv` sent to broker.
 
-### 7.6 Implementation Deviations from Design
+**Harness unit tests** (per-harness `*_test.go` files):
+- `TestClaudeRequiredEnvKeys` — returns `[ANTHROPIC_API_KEY]` regardless of auth type.
+- `TestGeminiRequiredEnvKeys` — returns `[GEMINI_API_KEY]` for default/api-key, `[GOOGLE_CLOUD_PROJECT]` for vertex-ai, `nil` for oauth-personal and compute-default-credentials.
+- `TestCodexRequiredEnvKeys` — returns `nil`.
+- `TestGenericRequiredEnvKeys` — returns `nil`.
+- `TestOpenCodeRequiredEnvKeys` — returns `[ANTHROPIC_API_KEY]`.
+
+### 7.6 Grove-Scoped Agent Create Handler (`edba6ec`)
+
+The env-gather flow was only wired into `createAgent()` (the `/api/v1/agents` route used by the Broker control channel), but not into `createGroveAgent()` (the `/api/v1/groves/{groveId}/agents` route the CLI actually hits). This meant `GatherEnv=true` from the CLI was decoded correctly but never acted upon — the handler always called `DispatchAgentCreate` instead of `DispatchAgentCreateWithGather`.
+
+**Handler fix** (`pkg/hub/handlers.go`): Added the same `req.GatherEnv` routing logic to `createGroveAgent()`. When `GatherEnv` is true, the handler calls `DispatchAgentCreateWithGather` and handles the 202 path (setting agent status to `provisioning`, building the enriched `EnvGatherResponse`, returning HTTP 202 with `CreateAgentResponse.EnvGather` populated). The non-gather path remains unchanged.
+
+### 7.7 Harness-Aware Env Key Extraction (`e1dc8c7`)
+
+The broker's `extractRequiredEnvKeys()` previously only detected env requirements from settings `harness_configs[*].env` empty-value entries. When no `harness_configs` section existed in settings (common case), it returned 0 required keys, making env-gather ineffective in practice.
+
+**Harness interface** (`pkg/api/harness.go`): Added `RequiredEnvKeys(authSelectedType string) []string` to the `Harness` interface. Each harness declares its intrinsic env requirements:
+- `ClaudeCode` → `[ANTHROPIC_API_KEY]`
+- `GeminiCLI` → varies by auth type: `[GEMINI_API_KEY]` for default/api-key, `[GOOGLE_CLOUD_PROJECT]` for vertex-ai, `nil` for oauth-personal/compute-default-credentials
+- `OpenCode` → `[ANTHROPIC_API_KEY]`
+- `Codex`, `Generic` → `nil`
+
+**Broker extraction rewrite** (`pkg/runtimebroker/handlers.go`): `extractRequiredEnvKeys()` now uses a two-phase approach:
+1. **Phase 1 (harness-aware):** Resolves the active harness-config name via `resolveHarnessConfigName()`, loads the on-disk harness-config directory to determine the harness type and `auth_selected_type`, then calls the harness's `RequiredEnvKeys()` to get intrinsic requirements.
+2. **Phase 2 (settings-based):** Preserved from the original implementation — extracts keys with empty values from settings `harness_configs[*].env` and `profiles[*].env`, allowing users to declare custom env requirements beyond what the harness itself needs.
+
+**Harness-config resolution** (`pkg/runtimebroker/handlers.go`): Two new methods support Phase 1:
+- `resolveHarnessConfigName()` — determines which harness-config to use via a resolution chain: explicit `req.Config.Harness` → template name matching on-disk directory → template name matching settings entry → profile's `DefaultHarnessConfig` → settings' `DefaultHarnessConfig`.
+- `resolveHarnessIdentity()` — loads the on-disk harness-config directory and applies settings overrides (via `ResolveHarnessConfig`) to determine the final `harnessName` and `authSelectedType`. Settings profile `harness_overrides` for `auth_selected_type` take precedence over on-disk values.
+
+### 7.8 Implementation Deviations from Design
 
 **HTTP status codes instead of WebSocket messages.** The design (§3.5) specifies the gather request flowing over the existing WebSocket control channel. The implementation uses HTTP status codes (201 vs 202) tunneled through the existing WebSocket `RequestEnvelope`/`ResponseEnvelope` infrastructure instead of adding new WebSocket message types. The effect is the same — the Broker signals back to the Hub, which relays to the CLI — but the mechanism is HTTP-level rather than a distinct WS message type.
 
@@ -224,7 +259,7 @@ If `needs` is empty, the agent starts immediately (HTTP 201, existing fast path)
 
 **No explicit timeout on pending state.** The Broker stores pending agent state in memory with a `CreatedAt` timestamp but does not currently enforce a TTL or garbage-collect stale entries. This matches the design's open question (§5.2) and is deferred for a follow-up.
 
-### 7.7 Remaining Work (Post-MVP)
+### 7.9 Remaining Work (Post-MVP)
 
 The following items from §4 and §5 remain unimplemented:
 - TTL/GC for stalled pending gathers on the Broker
