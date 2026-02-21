@@ -485,7 +485,7 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 		} else {
 			util.Debugf("[env-gather] startAgentViaHub: no env vars in request config (Hub/Broker must supply all)")
 		}
-		util.Debugf("[env-gather] startAgentViaHub: NOTE — env-gather flow (CLI fallback for missing broker env) is not yet implemented; CLI will not be asked to provide env vars")
+		util.Debugf("[env-gather] startAgentViaHub: GatherEnv=true — broker will evaluate env completeness; CLI may be asked to supply missing keys")
 	}
 
 	// Detect non-git grove for workspace bootstrap
@@ -739,8 +739,14 @@ func createAgentWithBrokerResolution(ctx context.Context, hubCtx *HubContext, gr
 		resp, err := hubCtx.Client.GroveAgents(groveID).Create(ctx, req)
 		if err == nil {
 			if debugMode {
-				util.Debugf("[env-gather] createAgentWithBrokerResolution: Hub returned success (HTTP 200/201)")
-				util.Debugf("[env-gather]   no HTTP 202 env-gather response — broker/hub handled all env vars (or env-gather not implemented)")
+				if resp.EnvGather != nil {
+					util.Debugf("[env-gather] createAgentWithBrokerResolution: Hub returned 202 with env-gather requirements")
+					util.Debugf("[env-gather]   required: %v", resp.EnvGather.Required)
+					util.Debugf("[env-gather]   hubHas: %d keys, brokerHas: %d keys", len(resp.EnvGather.HubHas), len(resp.EnvGather.BrokerHas))
+					util.Debugf("[env-gather]   needs: %v", resp.EnvGather.Needs)
+				} else {
+					util.Debugf("[env-gather] createAgentWithBrokerResolution: Hub returned success — all env satisfied (no gather needed)")
+				}
 			}
 			return resp, nil
 		}

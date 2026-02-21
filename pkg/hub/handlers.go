@@ -529,6 +529,8 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		if !req.ProvisionOnly {
 			// Use env-gather dispatch if requested
 			if req.GatherEnv {
+				slog.Debug("Hub: env-gather requested, using DispatchAgentCreateWithGather",
+					"agent", agent.Name, "broker", agent.RuntimeBrokerID)
 				envReqs, err := dispatcher.DispatchAgentCreateWithGather(ctx, agent)
 				if err != nil {
 					warnings = append(warnings, "Failed to dispatch to runtime broker: "+err.Error())

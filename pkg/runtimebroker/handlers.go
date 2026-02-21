@@ -321,6 +321,14 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	// Env-gather: if GatherEnv is true, evaluate env completeness
 	if req.GatherEnv {
 		required := s.extractRequiredEnvKeys(req)
+		if s.config.Debug {
+			slog.Debug("Env-gather: evaluating env completeness",
+				"gatherEnv", req.GatherEnv,
+				"grovePath", req.GrovePath,
+				"requiredKeys", len(required),
+				"required", required,
+			)
+		}
 		if len(required) > 0 {
 			var hubHas, brokerHas, needs []string
 			for _, key := range required {
