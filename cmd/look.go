@@ -110,6 +110,7 @@ func printLookOutput(output string) {
 	fmt.Println()
 	fmt.Print(output)
 	fmt.Println()
+	fmt.Println()
 	fmt.Println(border("^"))
 }
 
