@@ -608,14 +608,14 @@ User: scion start researcher --broker prod-gke "analyze auth module"
 3. ~~Update CLI display to show "Hub provides: ANTHROPIC_API_KEY (secret)"~~ (no CLI changes needed — existing `EnvSource.Scope` display handles `"secret"` automatically)
 4. ~~Add tests to `handlers_envgather_test.go` and `envgather_test.go`~~
 
-### Phase 2: Template/Settings `secrets` Section
+### Phase 2: Template/Settings `secrets` Section — **Implemented**
 
-1. Add `RequiredSecret` type to `pkg/api/types.go`
-2. Add `Secrets []RequiredSecret` field to `HarnessConfigEntry` and `V1ProfileConfig` in `pkg/config/settings_v1.go`
-3. Add template config parsing for `secrets` section
-4. Extend `extractRequiredEnvKeys()` to include Phase 3 (secrets declarations)
-5. Add `SecretInfo` to gather response types
-6. Update CLI gather to render secret descriptions
+1. ~~Add `RequiredSecret` type to `pkg/api/types.go`~~
+2. ~~Add `Secrets []RequiredSecret` field to `HarnessConfigEntry` and `V1ProfileConfig` in `pkg/config/settings_v1.go`~~
+3. ~~Add template config parsing for `secrets` section~~
+4. ~~Extend `extractRequiredEnvKeys()` to include Phase 3 (secrets declarations)~~
+5. ~~Add `SecretInfo` to gather response types~~
+6. ~~Update CLI gather to render secret descriptions~~
 
 ### Phase 3: CLI Interactive Secret Input
 
