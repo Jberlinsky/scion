@@ -589,3 +589,312 @@ profiles:
 		}
 	}
 }
+
+// TestEnvGather_SettingsHarnessSecrets tests that secrets declared in
+// harness_configs[*].secrets are extracted as required keys.
+func TestEnvGather_SettingsHarnessSecrets(t *testing.T) {
+	settings := `
+schema_version: "1"
+harness_configs:
+  claude:
+    harness: claude
+    secrets:
+      - key: THIRD_PARTY_TOKEN
+        description: "Token for third-party API integration"
+profiles:
+  default:
+    runtime: docker
+`
+	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
+
+	body := `{
+		"name": "test-agent-harness-secrets",
+		"id": "agent-uuid-hs",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"resolvedEnv": {"ANTHROPIC_API_KEY": "sk-ant-key"},
+		"config": {"template": "claude", "profile": "default"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var envReqs EnvRequirementsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &envReqs); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	// THIRD_PARTY_TOKEN should be in needs
+	found := false
+	for _, k := range envReqs.Needs {
+		if k == "THIRD_PARTY_TOKEN" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected THIRD_PARTY_TOKEN in needs, got %v", envReqs.Needs)
+	}
+
+	// SecretInfo should be populated with description and source
+	if envReqs.SecretInfo == nil {
+		t.Fatal("expected SecretInfo to be set")
+	}
+	info, ok := envReqs.SecretInfo["THIRD_PARTY_TOKEN"]
+	if !ok {
+		t.Fatal("expected THIRD_PARTY_TOKEN in SecretInfo")
+	}
+	if info.Description != "Token for third-party API integration" {
+		t.Errorf("expected description='Token for third-party API integration', got %q", info.Description)
+	}
+	if info.Source != "settings" {
+		t.Errorf("expected source='settings', got %q", info.Source)
+	}
+}
+
+// TestEnvGather_SettingsProfileSecrets tests that secrets declared in
+// profiles[*].secrets are extracted as required keys.
+func TestEnvGather_SettingsProfileSecrets(t *testing.T) {
+	settings := `
+schema_version: "1"
+harness_configs:
+  claude:
+    harness: claude
+profiles:
+  default:
+    runtime: docker
+    secrets:
+      - key: PROFILE_SECRET
+        description: "Secret required by this profile"
+`
+	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
+
+	// Satisfy harness key via broker env
+	t.Setenv("ANTHROPIC_API_KEY", "broker-ant-key")
+
+	body := `{
+		"name": "test-agent-profile-secrets",
+		"id": "agent-uuid-ps",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"config": {"template": "claude", "profile": "default"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var envReqs EnvRequirementsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &envReqs); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	// PROFILE_SECRET should be in needs
+	found := false
+	for _, k := range envReqs.Needs {
+		if k == "PROFILE_SECRET" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected PROFILE_SECRET in needs, got %v", envReqs.Needs)
+	}
+}
+
+// TestEnvGather_RequestRequiredSecrets tests that RequiredSecrets in the
+// create request (from Hub template) are extracted as required keys.
+func TestEnvGather_RequestRequiredSecrets(t *testing.T) {
+	settings := `
+schema_version: "1"
+harness_configs:
+  claude:
+    harness: claude
+profiles:
+  default:
+    runtime: docker
+`
+	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
+
+	// Satisfy harness key via broker env
+	t.Setenv("ANTHROPIC_API_KEY", "broker-ant-key")
+
+	body := `{
+		"name": "test-agent-req-secrets",
+		"id": "agent-uuid-rs",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"requiredSecrets": [
+			{"key": "HUB_TEMPLATE_KEY", "description": "Key from Hub template"}
+		],
+		"config": {"template": "claude", "profile": "default"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var envReqs EnvRequirementsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &envReqs); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	// HUB_TEMPLATE_KEY should be in needs
+	found := false
+	for _, k := range envReqs.Needs {
+		if k == "HUB_TEMPLATE_KEY" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected HUB_TEMPLATE_KEY in needs, got %v", envReqs.Needs)
+	}
+
+	// SecretInfo should include the key with template source
+	if envReqs.SecretInfo == nil {
+		t.Fatal("expected SecretInfo to be set")
+	}
+	info, ok := envReqs.SecretInfo["HUB_TEMPLATE_KEY"]
+	if !ok {
+		t.Fatal("expected HUB_TEMPLATE_KEY in SecretInfo")
+	}
+	if info.Description != "Key from Hub template" {
+		t.Errorf("expected description='Key from Hub template', got %q", info.Description)
+	}
+	if info.Source != "template" {
+		t.Errorf("expected source='template', got %q", info.Source)
+	}
+}
+
+// TestEnvGather_SecretInfoOnlyNeeded tests that SecretInfo only includes
+// keys that are in needs (not satisfied ones).
+func TestEnvGather_SecretInfoOnlyNeeded(t *testing.T) {
+	settings := `
+schema_version: "1"
+harness_configs:
+  claude:
+    harness: claude
+    secrets:
+      - key: SATISFIED_KEY
+        description: "This key is satisfied"
+      - key: MISSING_KEY
+        description: "This key is missing"
+profiles:
+  default:
+    runtime: docker
+`
+	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
+
+	// Satisfy harness key and SATISFIED_KEY via resolved secrets
+	body := `{
+		"name": "test-agent-si-needed",
+		"id": "agent-uuid-sin",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"resolvedEnv": {"ANTHROPIC_API_KEY": "sk-ant-key"},
+		"resolvedSecrets": [
+			{"name": "SATISFIED_KEY", "type": "environment", "target": "SATISFIED_KEY", "value": "satisfied-val", "source": "user"}
+		],
+		"config": {"template": "claude", "profile": "default"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var envReqs EnvRequirementsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &envReqs); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	// SecretInfo should include MISSING_KEY but NOT SATISFIED_KEY
+	if envReqs.SecretInfo == nil {
+		t.Fatal("expected SecretInfo to be set")
+	}
+	if _, ok := envReqs.SecretInfo["SATISFIED_KEY"]; ok {
+		t.Error("SecretInfo should NOT include satisfied keys")
+	}
+	if _, ok := envReqs.SecretInfo["MISSING_KEY"]; !ok {
+		t.Error("SecretInfo should include MISSING_KEY")
+	}
+}
+
+// TestEnvGather_SettingsSecretsMerge tests that when the same key is declared
+// in both harness config and profile, the profile description wins (most specific).
+func TestEnvGather_SettingsSecretsMerge(t *testing.T) {
+	settings := `
+schema_version: "1"
+harness_configs:
+  claude:
+    harness: claude
+    secrets:
+      - key: SHARED_KEY
+        description: "From harness config"
+profiles:
+  default:
+    runtime: docker
+    secrets:
+      - key: SHARED_KEY
+        description: "From profile"
+`
+	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
+
+	// Satisfy harness key via broker env
+	t.Setenv("ANTHROPIC_API_KEY", "broker-ant-key")
+
+	body := `{
+		"name": "test-agent-merge",
+		"id": "agent-uuid-merge",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"config": {"template": "claude", "profile": "default"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var envReqs EnvRequirementsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &envReqs); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	if envReqs.SecretInfo == nil {
+		t.Fatal("expected SecretInfo to be set")
+	}
+	info, ok := envReqs.SecretInfo["SHARED_KEY"]
+	if !ok {
+		t.Fatal("expected SHARED_KEY in SecretInfo")
+	}
+	// Profile is processed after harness config, so profile description wins
+	if info.Description != "From profile" {
+		t.Errorf("expected description='From profile' (profile wins), got %q", info.Description)
+	}
+}

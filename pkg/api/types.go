@@ -270,6 +270,8 @@ type ScionConfig struct {
 	Hub         *AgentHubConfig      `json:"hub,omitempty" yaml:"hub,omitempty"`
 	Telemetry   *TelemetryConfig     `json:"telemetry,omitempty" yaml:"telemetry,omitempty"`
 
+	Secrets     []RequiredSecret     `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+
 	// Agnostic template fields (Phase 2)
 	AgentInstructions  string `json:"agent_instructions,omitempty" yaml:"agent_instructions,omitempty"`
 	SystemPrompt       string `json:"system_prompt,omitempty" yaml:"system_prompt,omitempty"`
@@ -362,6 +364,22 @@ type AgentInfo struct {
 
 	// Optimistic locking
 	StateVersion int64 `json:"stateVersion,omitempty"` // Version for concurrent update detection
+}
+
+// RequiredSecret declares a secret that must be available for an agent to start.
+// Declared in templates (scion-agent.yaml), settings harness configs, or settings profiles.
+type RequiredSecret struct {
+	Key         string `json:"key" yaml:"key"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Type        string `json:"type,omitempty" yaml:"type,omitempty"`     // "environment" (default), "variable", "file"
+	Target      string `json:"target,omitempty" yaml:"target,omitempty"` // Projection target (defaults to Key for env type)
+}
+
+// SecretKeyInfo provides metadata about a required secret key, including
+// a human-readable description and the source that declared it.
+type SecretKeyInfo struct {
+	Description string `json:"description,omitempty"`
+	Source      string `json:"source"` // "harness", "template", "settings"
 }
 
 // ResolvedSecret represents a secret that has been resolved from the Hub

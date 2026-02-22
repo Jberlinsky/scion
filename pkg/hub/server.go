@@ -236,6 +236,10 @@ type RemoteCreateAgentRequest struct {
 	// If required keys are missing, the broker returns HTTP 202 with env requirements.
 	GatherEnv bool `json:"gatherEnv,omitempty"`
 
+	// RequiredSecrets contains declared secrets from the template config.
+	// Passed to the broker so it can include them in env-gather requirements.
+	RequiredSecrets []api.RequiredSecret `json:"requiredSecrets,omitempty"`
+
 	// EnvSources tracks which scope provided each env var key (for reporting to CLI).
 	// Only populated when GatherEnv is true.
 	EnvSources map[string]string `json:"envSources,omitempty"`
@@ -284,12 +288,19 @@ type RemoteAgentResponse struct {
 
 // RemoteEnvRequirementsResponse is returned by the broker when env gather is needed.
 // The Hub uses this to relay env requirements back to the CLI.
+// SecretKeyInfo provides metadata about a required secret key.
+type SecretKeyInfo struct {
+	Description string `json:"description,omitempty"`
+	Source      string `json:"source"` // "harness", "template", "settings"
+}
+
 type RemoteEnvRequirementsResponse struct {
-	AgentID   string   `json:"agentId"`
-	Required  []string `json:"required"`
-	HubHas    []string `json:"hubHas"`
-	BrokerHas []string `json:"brokerHas"`
-	Needs     []string `json:"needs"`
+	AgentID    string                  `json:"agentId"`
+	Required   []string                `json:"required"`
+	HubHas     []string                `json:"hubHas"`
+	BrokerHas  []string                `json:"brokerHas"`
+	Needs      []string                `json:"needs"`
+	SecretInfo map[string]SecretKeyInfo `json:"secretInfo,omitempty"`
 }
 
 // RemoteAgentInfo contains agent information from a remote runtime broker.

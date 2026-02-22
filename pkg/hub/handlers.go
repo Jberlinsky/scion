@@ -206,11 +206,12 @@ type CreateAgentResponse struct {
 
 // EnvGatherResponse contains env requirements relayed from the broker.
 type EnvGatherResponse struct {
-	AgentID   string      `json:"agentId"`
-	Required  []string    `json:"required"`
-	HubHas    []EnvSource `json:"hubHas"`
-	BrokerHas []string    `json:"brokerHas"`
-	Needs     []string    `json:"needs"`
+	AgentID    string                  `json:"agentId"`
+	Required   []string                `json:"required"`
+	HubHas     []EnvSource             `json:"hubHas"`
+	BrokerHas  []string                `json:"brokerHas"`
+	Needs      []string                `json:"needs"`
+	SecretInfo map[string]SecretKeyInfo `json:"secretInfo,omitempty"`
 }
 
 // EnvSource tracks which scope provided an env var key.
@@ -631,6 +632,17 @@ func (s *Server) buildEnvGatherResponse(ctx context.Context, agent *store.Agent,
 			}
 		}
 		resp.HubHas = append(resp.HubHas, source)
+	}
+
+	// Relay SecretInfo from broker
+	if len(brokerReqs.SecretInfo) > 0 {
+		resp.SecretInfo = make(map[string]SecretKeyInfo, len(brokerReqs.SecretInfo))
+		for k, v := range brokerReqs.SecretInfo {
+			resp.SecretInfo[k] = SecretKeyInfo{
+				Description: v.Description,
+				Source:      v.Source,
+			}
+		}
 	}
 
 	return resp

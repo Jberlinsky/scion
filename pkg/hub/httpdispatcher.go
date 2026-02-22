@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/secret"
 	"github.com/ptone/scion-agent/pkg/store"
 )
@@ -574,6 +575,22 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 			GitClone:     agent.AppliedConfig.GitClone,
 		}
 		req.ResolvedEnv = agent.AppliedConfig.Env
+	}
+
+	// Include template secrets declarations for broker env-gather
+	if agent.AppliedConfig != nil && agent.AppliedConfig.TemplateID != "" {
+		tmpl, err := d.store.GetTemplate(ctx, agent.AppliedConfig.TemplateID)
+		if err == nil && tmpl != nil && tmpl.Config != nil && len(tmpl.Config.Secrets) > 0 {
+			req.RequiredSecrets = make([]api.RequiredSecret, len(tmpl.Config.Secrets))
+			for i, s := range tmpl.Config.Secrets {
+				req.RequiredSecrets[i] = api.RequiredSecret{
+					Key:         s.Key,
+					Description: s.Description,
+					Type:        s.Type,
+					Target:      s.Target,
+				}
+			}
+		}
 	}
 
 	// Resolve type-aware secrets from all applicable scopes

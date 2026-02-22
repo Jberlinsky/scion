@@ -748,6 +748,85 @@ func TestEnvGather_BuildResponse_SecretScope(t *testing.T) {
 	}
 }
 
+// TestEnvGather_SecretInfoRelay tests that SecretInfo is relayed from the
+// broker response through to the CLI-facing EnvGatherResponse.
+func TestEnvGather_SecretInfoRelay(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{ID: "grove-si-relay", Name: "si-relay-grove", Slug: "si-relay-grove"}
+	if err := st.CreateGrove(ctx, grove); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID: "broker-si-relay", Name: "si-relay-broker", Slug: "si-relay-broker",
+		Endpoint: "http://localhost:9800", Status: store.BrokerStatusOnline,
+	}
+	if err := st.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID: "grove-si-relay", BrokerID: "broker-si-relay",
+		LocalPath: "/tmp/test-grove",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock broker returns SecretInfo in env requirements
+	mockClient := &envGatherMockBrokerClient{
+		gatherReturnEnvReqs: &RemoteEnvRequirementsResponse{
+			AgentID:  "will-be-set",
+			Required: []string{"API_KEY", "CUSTOM_TOKEN"},
+			Needs:    []string{"CUSTOM_TOKEN"},
+			HubHas:   []string{"API_KEY"},
+			SecretInfo: map[string]SecretKeyInfo{
+				"CUSTOM_TOKEN": {Description: "Token for custom integration", Source: "settings"},
+			},
+		},
+	}
+	dispatcher := NewHTTPAgentDispatcherWithClient(st, mockClient, true)
+	srv.SetDispatcher(dispatcher)
+
+	reqBody := map[string]interface{}{
+		"name":      "si-relay-agent",
+		"groveId":   "grove-si-relay",
+		"template":  "claude",
+		"gatherEnv": true,
+	}
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", reqBody)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp CreateAgentResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	if resp.EnvGather == nil {
+		t.Fatal("expected EnvGather to be set")
+	}
+
+	// SecretInfo should be relayed
+	if resp.EnvGather.SecretInfo == nil {
+		t.Fatal("expected SecretInfo to be relayed")
+	}
+	info, ok := resp.EnvGather.SecretInfo["CUSTOM_TOKEN"]
+	if !ok {
+		t.Fatal("expected CUSTOM_TOKEN in SecretInfo")
+	}
+	if info.Description != "Token for custom integration" {
+		t.Errorf("expected description='Token for custom integration', got %q", info.Description)
+	}
+	if info.Source != "settings" {
+		t.Errorf("expected source='settings', got %q", info.Source)
+	}
+}
+
 // TestEnvGather_HubHandler_RetryAfterCancel_GroveRoute tests the same retry
 // scenario via the grove-scoped route /api/v1/groves/{groveId}/agents.
 func TestEnvGather_HubHandler_RetryAfterCancel_GroveRoute(t *testing.T) {

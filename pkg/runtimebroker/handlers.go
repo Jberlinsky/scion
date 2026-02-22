@@ -330,7 +330,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Env-gather: if GatherEnv is true, evaluate env completeness
 	if req.GatherEnv {
-		required := s.extractRequiredEnvKeys(req)
+		required, secretInfo := s.extractRequiredEnvKeys(req)
 		if s.config.Debug {
 			slog.Debug("Env-gather: evaluating env completeness",
 				"gatherEnv", req.GatherEnv,
@@ -391,12 +391,24 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 					)
 				}
 
+					// Build SecretInfo for needed keys only
+				var respSecretInfo map[string]api.SecretKeyInfo
+				for _, key := range needs {
+					if info, ok := secretInfo[key]; ok {
+						if respSecretInfo == nil {
+							respSecretInfo = make(map[string]api.SecretKeyInfo)
+						}
+						respSecretInfo[key] = info
+					}
+				}
+
 				writeJSON(w, http.StatusAccepted, EnvRequirementsResponse{
-					AgentID:   req.ID,
-					Required:  required,
-					HubHas:    hubHas,
-					BrokerHas: brokerHas,
-					Needs:     needs,
+					AgentID:    req.ID,
+					Required:   required,
+					HubHas:     hubHas,
+					BrokerHas:  brokerHas,
+					Needs:      needs,
+					SecretInfo: respSecretInfo,
 				})
 				return
 			}
@@ -981,7 +993,7 @@ func (s *Server) checkAgentPrompt(w http.ResponseWriter, r *http.Request, id str
 // Phase 2 (settings-based): Extracts keys with empty values from settings
 // harness_configs[*].env and profiles[*].env, allowing users to declare custom
 // env requirements.
-func (s *Server) extractRequiredEnvKeys(req CreateAgentRequest) []string {
+func (s *Server) extractRequiredEnvKeys(req CreateAgentRequest) ([]string, map[string]api.SecretKeyInfo) {
 	required := make(map[string]struct{})
 
 	var settings *config.VersionedSettings
@@ -1043,11 +1055,70 @@ func (s *Server) extractRequiredEnvKeys(req CreateAgentRequest) []string {
 		}
 	}
 
+	// Phase 3: Secrets declarations from settings and template
+	secretInfo := make(map[string]api.SecretKeyInfo)
+
+	// 3a: Harness RequiredEnvKeys are all secret-eligible (no description available)
+	for k := range required {
+		secretInfo[k] = api.SecretKeyInfo{Source: "harness"}
+	}
+
+	// 3b: Settings harness_configs[*].secrets
+	if settings != nil {
+		for _, hcfg := range settings.HarnessConfigs {
+			for _, sec := range hcfg.Secrets {
+				required[sec.Key] = struct{}{}
+				secretInfo[sec.Key] = api.SecretKeyInfo{
+					Description: sec.Description,
+					Source:      "settings",
+				}
+			}
+		}
+
+		// 3c: Profile secrets
+		if profileName != "" && settings.Profiles != nil {
+			if profile, ok := settings.Profiles[profileName]; ok {
+				for _, sec := range profile.Secrets {
+					required[sec.Key] = struct{}{}
+					secretInfo[sec.Key] = api.SecretKeyInfo{
+						Description: sec.Description,
+						Source:      "settings",
+					}
+				}
+			}
+		}
+	}
+
+	// 3d: Template secrets (from request or local template)
+	for _, sec := range req.RequiredSecrets {
+		required[sec.Key] = struct{}{}
+		secretInfo[sec.Key] = api.SecretKeyInfo{
+			Description: sec.Description,
+			Source:      "template",
+		}
+	}
+	// Also try loading local template config
+	if req.Config != nil && req.Config.Template != "" && req.GrovePath != "" {
+		if tmpl, err := config.FindTemplateInGrovePath(req.Config.Template, req.GrovePath); err == nil {
+			if cfg, err := tmpl.LoadConfig(); err == nil && cfg != nil {
+				for _, sec := range cfg.Secrets {
+					required[sec.Key] = struct{}{}
+					if _, exists := secretInfo[sec.Key]; !exists {
+						secretInfo[sec.Key] = api.SecretKeyInfo{
+							Description: sec.Description,
+							Source:      "template",
+						}
+					}
+				}
+			}
+		}
+	}
+
 	keys := make([]string, 0, len(required))
 	for k := range required {
 		keys = append(keys, k)
 	}
-	return keys
+	return keys, secretInfo
 }
 
 // resolveHarnessConfigName determines which harness-config to use for the agent.

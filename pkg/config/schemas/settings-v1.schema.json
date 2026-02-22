@@ -222,6 +222,11 @@
         "auth_selected_type": {
           "type": "string",
           "description": "Authentication mechanism to use (e.g., gemini-api-key, vertex-ai, oauth-personal)."
+        },
+        "secrets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/requiredSecret" },
+          "description": "Required secrets for this harness configuration."
         }
       },
       "additionalProperties": false
@@ -255,6 +260,11 @@
           "type": "object",
           "description": "Per-harness-config overrides applied when using this profile. Keys are harness-config names.",
           "additionalProperties": { "$ref": "#/$defs/harnessOverride" }
+        },
+        "secrets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/requiredSecret" },
+          "description": "Required secrets for agents created under this profile."
         }
       },
       "additionalProperties": false
@@ -691,6 +701,17 @@
           },
           "x-since": "1"
         }
+      },
+      "additionalProperties": false
+    },
+    "requiredSecret": {
+      "type": "object",
+      "required": ["key"],
+      "properties": {
+        "key": { "type": "string", "description": "Secret key name." },
+        "description": { "type": "string", "description": "Human-readable description." },
+        "type": { "type": "string", "enum": ["environment", "variable", "file"], "default": "environment" },
+        "target": { "type": "string", "description": "Projection target (defaults to key for env type)." }
       },
       "additionalProperties": false
     }

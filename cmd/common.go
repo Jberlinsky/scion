@@ -926,10 +926,22 @@ func gatherAndSubmitEnv(ctx context.Context, hubCtx *HubContext, groveID string,
 		if !isJSONOutput() {
 			fmt.Fprintln(os.Stderr)
 			for _, key := range missingKeys {
+				if gather.SecretInfo != nil {
+					if info, ok := gather.SecretInfo[key]; ok && info.Description != "" {
+						fmt.Fprintf(os.Stderr, "  %s — MISSING: %s\n", key, info.Description)
+						continue
+					}
+				}
 				fmt.Fprintf(os.Stderr, "  %s — MISSING (not in local environment)\n", key)
 			}
 			fmt.Fprintf(os.Stderr, "\nTo set missing variables on the Hub, use:\n")
 			for _, key := range missingKeys {
+				if gather.SecretInfo != nil {
+					if _, ok := gather.SecretInfo[key]; ok {
+						fmt.Fprintf(os.Stderr, "  scion hub secret set %s <value>\n", key)
+						continue
+					}
+				}
 				fmt.Fprintf(os.Stderr, "  scion hub env set %s <value>\n", key)
 			}
 			fmt.Fprintln(os.Stderr)

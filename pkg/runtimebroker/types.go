@@ -185,6 +185,10 @@ type CreateAgentRequest struct {
 	// If required keys are missing, the broker returns HTTP 202 with EnvRequirementsResponse
 	// instead of starting the agent, allowing the caller to gather and submit the missing values.
 	GatherEnv bool `json:"gatherEnv,omitempty"`
+
+	// RequiredSecrets contains declared secrets from the template config.
+	// Passed by the Hub so the broker can include them in env-gather requirements.
+	RequiredSecrets []api.RequiredSecret `json:"requiredSecrets,omitempty"`
 }
 
 // CreateAgentConfig contains configuration for agent creation.
@@ -229,11 +233,12 @@ type CreateAgentResponse struct {
 // and the merged environment is missing required keys. The broker returns
 // HTTP 202 with this payload instead of starting the agent.
 type EnvRequirementsResponse struct {
-	AgentID   string   `json:"agentId"`
-	Required  []string `json:"required"`
-	HubHas    []string `json:"hubHas"`
-	BrokerHas []string `json:"brokerHas"`
-	Needs     []string `json:"needs"`
+	AgentID    string                      `json:"agentId"`
+	Required   []string                    `json:"required"`
+	HubHas     []string                    `json:"hubHas"`
+	BrokerHas  []string                    `json:"brokerHas"`
+	Needs      []string                    `json:"needs"`
+	SecretInfo map[string]api.SecretKeyInfo `json:"secretInfo,omitempty"`
 }
 
 // FinalizeEnvRequest is sent to the broker to supply gathered env vars

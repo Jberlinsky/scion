@@ -145,12 +145,19 @@ type CreateAgentResponse struct {
 
 // EnvGatherResponse contains env requirements returned by the Hub when the
 // broker cannot satisfy all required environment variables.
+// SecretKeyInfo provides metadata about a required secret key.
+type SecretKeyInfo struct {
+	Description string `json:"description,omitempty"`
+	Source      string `json:"source"` // "harness", "template", "settings"
+}
+
 type EnvGatherResponse struct {
-	AgentID   string     `json:"agentId"`
-	Required  []string   `json:"required"`
-	HubHas    []EnvSource `json:"hubHas"`
-	BrokerHas []string   `json:"brokerHas"`
-	Needs     []string   `json:"needs"`
+	AgentID    string                  `json:"agentId"`
+	Required   []string                `json:"required"`
+	HubHas     []EnvSource             `json:"hubHas"`
+	BrokerHas  []string                `json:"brokerHas"`
+	Needs      []string                `json:"needs"`
+	SecretInfo map[string]SecretKeyInfo `json:"secretInfo,omitempty"`
 }
 
 // EnvSource tracks which scope provided an env var key.

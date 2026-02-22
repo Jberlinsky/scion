@@ -346,6 +346,7 @@ type HarnessConfigData struct {
 	Args             []string          `json:"args,omitempty"`
 	Env              map[string]string `json:"env,omitempty"`
 	AuthSelectedType string            `json:"authSelectedType,omitempty"`
+	Secrets          []api.RequiredSecret `json:"secrets,omitempty"`
 }
 
 // HarnessConfigStatus constants
@@ -373,6 +374,7 @@ type TemplateConfig struct {
 	Model       string            `json:"model,omitempty"`
 	Kubernetes  *KubernetesConfig `json:"kubernetes,omitempty"`
 	HubAccess   *HubAccessConfig  `json:"hubAccess,omitempty"`
+	Secrets     []api.RequiredSecret `json:"secrets,omitempty"`
 }
 
 // HubAccessConfig defines what Hub API scopes an agent created from this template receives.
