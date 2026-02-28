@@ -51,7 +51,7 @@ Replace the flat `status` string with a structured, layered model that separates
 │                                                                     │
 │  2. ACTIVITY (runtime)    What is the running agent doing?          │
 │     idle | thinking | executing | waiting_for_input |               │
-│     completed | limits_exceeded | stalled                           │
+│     completed | limits_exceeded | stalled | undetermined            │
 │     (only meaningful when phase = running)                          │
 │                                                                     │
 │  3. DETAIL (context)      What specifically? (optional metadata)    │
@@ -120,8 +120,8 @@ The **phase** represents where the agent is in its infrastructure lifecycle. Thi
 | `stopping` | `stopping` |
 | `stopped` | `stopped` |
 | `error` | `error` |
-| `deleted` | (soft-delete flag, not a phase) |
-| `restored` | (restore clears soft-delete, sets `stopped`) |
+| `deleted` | (soft-delete flag via `deletedAt` timestamp, not a phase) |
+| `restored` | (not a state — restore clears soft-delete, agent returns to prior phase) |
 
 ### 2. Activity (Runtime State)
 
@@ -158,18 +158,24 @@ The **activity** represents what the agent is doing while it's running. This is 
         └────────────────┘         (sticky)
 
         ┌────────┐
-        │stalled │  (set by platform when no events received within timeout)
+        │stalled │  (set by platform when heartbeat present but no activity events)
         └────────┘
+
+        ┌──────────────┐
+        │undetermined  │  (set by platform when no heartbeat — broker may be disconnected)
+        └──────────────┘
 ```
 
-**Values**: `idle`, `thinking`, `executing`, `waiting_for_input`, `completed`, `limits_exceeded`, `stalled`
+**Values**: `idle`, `thinking`, `executing`, `waiting_for_input`, `completed`, `limits_exceeded`, `stalled`, `undetermined`
+
 
 **Rules**:
 - Activity is only set/meaningful when `phase = running`
 - When phase transitions away from `running`, activity is cleared (set to empty)
 - When phase transitions to `running`, activity defaults to `idle`
 - **Sticky activities** (`waiting_for_input`, `completed`, `limits_exceeded`) resist being overwritten by `idle` or other transient states. They are only cleared by "new work" events (`prompt-submit`, `agent-start`, `session-start`)
-- `stalled` is set by the platform (hub/broker) when no heartbeat or event has been received within a configurable timeout. It is cleared by any event from the agent.
+- **`stalled`** is set by the platform when the sciontool heartbeat is still being received but no activity events have arrived within a configurable timeout. The agent process is alive but appears hung. Cleared by any activity event from the agent.
+- **`undetermined`** is set by the platform when neither activity events nor the sciontool heartbeat have been received. The agent may still be running on a disconnected broker, so it could be doing work — the platform is simply blind to its current activity. The system may check broker connectivity to further refine this. Cleared by any event or heartbeat from the agent.
 
 **Mapping from current implementation**:
 | Current (sciontool UPPERCASE) | New Activity |
@@ -247,6 +253,7 @@ const (
     ActivityCompleted       Activity = "completed"
     ActivityLimitsExceeded  Activity = "limits_exceeded"
     ActivityStalled         Activity = "stalled"
+    ActivityUndetermined   Activity = "undetermined"
 )
 
 // IsStickyActivity returns true if the activity resists being overwritten
@@ -341,7 +348,8 @@ export type AgentActivity =
   | 'waiting_for_input'
   | 'completed'
   | 'limits_exceeded'
-  | 'stalled';
+  | 'stalled'
+  | 'undetermined';
 
 export interface AgentDetail {
   toolName?: string;
@@ -439,7 +447,7 @@ The Hub handler no longer needs to collapse `thinking`/`executing` into `busy` �
 
 The notification system currently triggers on status values like `COMPLETED`, `WAITING_FOR_INPUT`, `LIMITS_EXCEEDED`. Under the new model:
 
-- **Trigger conditions** are expressed as activity values: `completed`, `waiting_for_input`, `limits_exceeded`, `stalled`
+- **Trigger conditions** are expressed as activity values: `completed`, `waiting_for_input`, `limits_exceeded`, `stalled`, `undetermined`
 - **Notification subscriptions** store `triggerActivities` (renamed from `triggerStatuses`)
 - The normalization issue (UPPERCASE vs lowercase) is resolved since everything uses lowercase activity values
 
@@ -451,6 +459,8 @@ The status badge component can be simplified. Instead of a flat `StatusType` wit
 
 - **Non-running phases**: Show phase directly (provisioning → pulsing yellow, stopped → gray, error → red)
 - **Running + activity**: Show activity (idle → green, thinking → blue pulse, executing → blue pulse with tool name, waiting_for_input → amber, completed → green checkmark)
+
+Each badge should include a tooltip-style popover with a human-readable description of the current state (e.g., "Agent is waiting for user input" or "Agent is executing the Bash tool"). This helps users who are unfamiliar with the state model understand what's happening.
 
 ### Terminal Availability
 
@@ -464,6 +474,8 @@ function isTerminalAvailable(phase: AgentPhase): boolean {
 
 No need to reason about which "status" values imply a running container.
 
+**CLI `attach` fix**: The CLI `attach` command currently has a broken pre-check that rejects agents with `status: idle` even when the container is running. Under the new model, `attach` should check `phase` (not activity/status), which eliminates this bug — an agent with `phase: running, activity: idle` is clearly attachable.
+
 ### Agent List/Dashboard
 
 The dashboard can show richer information:
@@ -472,13 +484,26 @@ The dashboard can show richer information:
 - Tool name tooltip when executing
 - Task summary as secondary text
 
-## Stalled Detection
+## Stalled and Undetermined Detection
 
-A new `stalled` activity is introduced for agents that haven't reported events within a configurable timeout. This is set by the platform, not the agent itself:
+Two platform-set activities are introduced for agents whose state cannot be determined through normal event flow. Both are set by the platform, not by the agent itself, and should be implemented as scheduled jobs via the scheduler system.
 
-- **Detection**: The Hub checks `lastSeen` during heartbeat processing. If `lastSeen` is older than a configured threshold (e.g., 5 minutes) and `phase = running` and `activity` is not a terminal sticky state (`completed`, `limits_exceeded`), the Hub sets `activity = stalled`.
-- **Recovery**: Any event from the agent clears `stalled` and sets the appropriate activity.
-- **Notification**: `stalled` can be a notification trigger, enabling users to investigate hung agents.
+### Stalled (heartbeat present, no activity)
+
+An agent is `stalled` when the sciontool heartbeat is still being received (the process is alive) but no activity events have arrived within a configurable timeout. This typically means the agent process is hung or blocked.
+
+- **Detection**: A scheduled job checks `lastActivityEvent` for all agents with `phase = running`. If the timestamp exceeds the configured threshold (e.g., 5 minutes) and a recent heartbeat has been received, and `activity` is not a terminal sticky state (`completed`, `limits_exceeded`), the scheduler sets `activity = stalled`.
+- **Recovery**: Any activity event from the agent clears `stalled` and sets the appropriate activity.
+- **Notification**: `stalled` is a notification trigger, enabling users to investigate hung agents.
+
+### Undetermined (no heartbeat, broker may be disconnected)
+
+An agent is `undetermined` when neither activity events nor the sciontool heartbeat have been received. The agent may still be running and doing work on a broker that has become disconnected — the platform is simply blind to its current activity.
+
+- **Detection**: A scheduled job checks `lastHeartbeat` for all agents with `phase = running`. If the timestamp exceeds the heartbeat timeout threshold and `activity` is not a terminal sticky state, the scheduler sets `activity = undetermined`.
+- **Refinement**: The system may additionally check broker connectivity status. If the broker itself is unreachable, this strengthens the `undetermined` classification. If the broker is connected but the agent has no heartbeat, this may indicate the agent process crashed (potentially escalate to `phase = error`).
+- **Recovery**: Any event or heartbeat from the agent clears `undetermined` and restores the appropriate activity.
+- **Notification**: `undetermined` is a notification trigger, enabling users to investigate connectivity issues.
 
 This replaces the previously discussed but unimplemented "stale/stalled detection" from the notifications design.
 
@@ -522,12 +547,13 @@ This replaces the previously discussed but unimplemented "stale/stalled detectio
 4. Update terminal availability check
 5. Update agent detail page, agent list, dashboard
 
-### Phase 6: Cleanup
+### Phase 6: Cleanup and Documentation
 
 1. Remove all duplicate status constant definitions across the codebase
-2. Remove the deprecated flat `status` field from the API (major version bump, or keep as computed)
+2. Remove the deprecated flat `status` field from the API (see Backward Compatibility)
 3. Update notification subscriptions to use `triggerActivities`
 4. Update design docs to reference the new model
+5. Update the docs-site with the new state model, API field changes, and migration guidance
 
 ## Backward Compatibility
 
@@ -542,18 +568,30 @@ func (s AgentState) DisplayStatus() string {
 }
 ```
 
-This means:
-- Existing API consumers that read `status` continue to work
-- The value they see becomes more precise (e.g., `thinking` instead of `busy`, `executing` instead of `busy`)
-- New API consumers can use `phase`/`activity`/`detail` for richer state information
-- The `busy` value is retired — consumers see the actual activity
+Since the project is still in alpha with few outstanding client installs, the `status` field should be treated as a **short-lived migration aid**, not a permanent fixture. The recommended approach:
+
+- **During implementation (Phases 1–5)**: Retain `status` as a computed field so existing UI and CLI code isn't broken while being migrated.
+- **At cleanup (Phase 6)**: Remove `status` entirely from the API response and database. All consumers should have been updated to use `phase`/`activity` by this point.
+- The `busy` value is retired immediately — consumers see the actual activity (`thinking`, `executing`) instead.
+
+This avoids the technical debt of maintaining a legacy computed field indefinitely.
+
+## Resolved Design Decisions
+
+1. **`cloning` is a separate phase** (not a sub-phase of `provisioning`). This keeps `provisioning` purely about the container, while `cloning` covers git workspace preparation. Both are visible as distinct lifecycle steps.
+
+2. **`stalled` is an activity** (not a separate boolean flag). When an agent becomes stalled, the last known activity is preserved in `detail.message` for diagnostic context.
+
+3. **`thinking` means the LLM is actively processing/generating.** This is the narrow definition — `thinking` maps to the LLM API call itself, not to the broader "agent turn is active" concept. For Claude Code, which doesn't fire `model-start`/`model-end` events, `thinking` is the default activity between `prompt-submit`/`agent-start` and the first `tool-start`, and between `tool-end` and the next `tool-start` or `agent-end`.
+
+4. **Soft-delete is not a phase.** `deleted` and `restored` are not lifecycle states. Soft-delete uses a `deletedAt` timestamp. Restoring an agent clears the soft-delete flag and returns the agent to its prior phase (typically `stopped`). The `restored` value is removed entirely — it was always just the act of returning to a normal state.
 
 ## Open Questions
 
-1. **Should `cloning` be a sub-phase of `provisioning`?** Currently `cloning` is a distinct lifecycle step, but it only happens during provisioning. It could be modeled as `phase: provisioning, detail.message: "Cloning repository"` instead of a separate phase. Keeping it separate provides better visibility.
+1. **`undetermined` naming and semantics**: When neither heartbeat nor activity events are received, the platform cannot know if the agent is still working on a disconnected broker or has crashed. The name `undetermined` reflects this ambiguity, but alternatives like `unreachable` or `offline` were considered. `unreachable` implies a network problem (which may not be the case — the broker process itself could have died). `offline` implies the agent is down (but it could still be running). Is `undetermined` the right term, or does it feel too vague for users to act on?
 
-2. **Should `stalled` be an activity or a separate flag?** Making it an activity means it overwrites the last known activity (`thinking`, `executing`). A separate `isStalled` boolean would preserve the last activity. The trade-off is complexity vs information preservation. Recommendation: keep as activity for simplicity, preserve last activity in `detail.message`.
+2. **Escalation from `undetermined` to `error`**: If a broker is confirmed connected but an agent on it has no heartbeat, this likely means the agent process crashed. Should the system automatically escalate to `phase = error` in this case, or should it remain `undetermined` and require manual investigation? Auto-escalation risks false positives if the heartbeat mechanism itself is flawed.
 
-3. **Granularity of `thinking` vs `executing`**: Claude Code doesn't distinguish model calls from tool calls as cleanly as Gemini does. The `model-start`/`model-end` events from Gemini give true LLM API call boundaries, while Claude fires `prompt-submit` → (`tool-start`/`tool-end`)* → `agent-end`. Should `thinking` specifically mean "LLM is generating" or more broadly "agent is processing"? Recommendation: `thinking` = agent turn is active but no tool is running; `executing` = a tool is actively running.
+3. **Scheduler integration for stalled/undetermined detection**: The detection jobs need to run periodically. Should these be first-class scheduled jobs in the existing scheduler system, or lightweight goroutine-based timers within the Hub? The scheduler approach is preferred for consistency and configurability, but adds a dependency on the scheduler being operational.
 
-4. **Soft-delete representation**: `deleted`/`restored` are currently status values. In the new model, soft-delete is a separate concern (a `deletedAt` timestamp), not a phase. This is already partially implemented. Confirm this approach.
+4. **Claude Code `thinking` inference**: Since Claude Code doesn't emit `model-start`/`model-end` events, `thinking` must be inferred from the absence of tool execution during an active agent turn. Is this inference reliable enough, or do we need to pursue harness-level changes to emit these events? If Claude Code adds native event support in the future, the inference logic would need to be updated.
