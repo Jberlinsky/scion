@@ -56,8 +56,8 @@ func TestSchedulerStartStop(t *testing.T) {
 
 	s.Stop()
 
-	// Verify stop is idempotent-safe (wg.Wait returns immediately)
-	// If Stop didn't properly signal, this would deadlock.
+	// Calling Stop twice must not panic
+	s.Stop()
 }
 
 func TestSchedulerTickZero(t *testing.T) {

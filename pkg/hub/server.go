@@ -364,6 +364,7 @@ type Server struct {
 	maintenance               *MaintenanceState   // Runtime maintenance mode state
 	embeddedBrokerID          string              // Broker ID when running in hub+broker combo mode
 	scheduler                 *Scheduler          // Unified scheduler for recurring tasks
+	cleanupOnce               sync.Once           // Ensures CleanupResources runs only once
 }
 
 // New creates a new Hub API server.
@@ -1020,27 +1021,29 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // event publisher) without stopping an HTTP server. Use this in combined mode
 // where the Hub API is mounted on the WebServer and has no listener of its own.
 func (s *Server) CleanupResources(ctx context.Context) error {
-	s.mu.RLock()
-	cc := s.controlChannel
-	s.mu.RUnlock()
+	s.cleanupOnce.Do(func() {
+		s.mu.RLock()
+		cc := s.controlChannel
+		s.mu.RUnlock()
 
-	slog.Info("Cleaning up Hub resources...")
+		slog.Info("Cleaning up Hub resources...")
 
-	if cc != nil {
-		cc.Shutdown()
-	}
-	if s.brokerAuthService != nil {
-		s.brokerAuthService.Close()
-	}
-	if s.scheduler != nil {
-		s.scheduler.Stop()
-	}
-	if s.notificationDispatcher != nil {
-		s.notificationDispatcher.Stop()
-	}
-	if s.events != nil {
-		s.events.Close()
-	}
+		if cc != nil {
+			cc.Shutdown()
+		}
+		if s.brokerAuthService != nil {
+			s.brokerAuthService.Close()
+		}
+		if s.scheduler != nil {
+			s.scheduler.Stop()
+		}
+		if s.notificationDispatcher != nil {
+			s.notificationDispatcher.Stop()
+		}
+		if s.events != nil {
+			s.events.Close()
+		}
+	})
 	return nil
 }
 

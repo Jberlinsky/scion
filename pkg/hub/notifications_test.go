@@ -411,6 +411,15 @@ func TestNotificationDispatcher_Stop(t *testing.T) {
 	assert.Empty(t, env.dispatcher.getCalls())
 }
 
+func TestNotificationDispatcher_DoubleStop(t *testing.T) {
+	env := setupNotificationTest(t)
+	env.nd.Start()
+
+	// Calling Stop twice must not panic
+	env.nd.Stop()
+	env.nd.Stop()
+}
+
 func TestNotificationDispatcher_NilDispatcher(t *testing.T) {
 	env := setupNotificationTest(t)
 	// Replace with a nil-returning getter to simulate no dispatcher available

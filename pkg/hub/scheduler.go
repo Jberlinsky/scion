@@ -58,8 +58,9 @@ type Scheduler struct {
 	timers map[string]*scheduledTimer
 
 	// Lifecycle
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 }
 
 // RecurringHandler defines a periodic task driven by the root ticker.
@@ -146,20 +147,22 @@ func (s *Scheduler) Start(ctx context.Context) {
 // Stop signals the scheduler to stop, cancels all pending one-shot timers,
 // and waits for the root ticker goroutine to exit. In-flight handler
 // goroutines are not tracked; they will be cancelled via the parent context
-// when the server shuts down.
+// when the server shuts down. It is safe to call multiple times.
 func (s *Scheduler) Stop() {
-	close(s.stopCh)
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
 
-	// Cancel all one-shot timers
-	s.mu.Lock()
-	for _, st := range s.timers {
-		st.Timer.Stop()
-		if st.Cancel != nil {
-			st.Cancel()
+		// Cancel all one-shot timers
+		s.mu.Lock()
+		for _, st := range s.timers {
+			st.Timer.Stop()
+			if st.Cancel != nil {
+				st.Cancel()
+			}
 		}
-	}
-	s.timers = make(map[string]*scheduledTimer)
-	s.mu.Unlock()
+		s.timers = make(map[string]*scheduledTimer)
+		s.mu.Unlock()
+	})
 
 	s.wg.Wait()
 }

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/api"
@@ -34,6 +35,7 @@ type NotificationDispatcher struct {
 	events        *ChannelEventPublisher
 	getDispatcher func() AgentDispatcher // lazy getter; dispatcher may be set after startup
 	stopCh        chan struct{}
+	stopOnce      sync.Once
 }
 
 // NewNotificationDispatcher creates a new NotificationDispatcher.
@@ -71,10 +73,12 @@ func (nd *NotificationDispatcher) Start() {
 	slog.Info("Notification dispatcher started")
 }
 
-// Stop signals the dispatcher goroutine to exit.
+// Stop signals the dispatcher goroutine to exit. It is safe to call multiple times.
 func (nd *NotificationDispatcher) Stop() {
-	close(nd.stopCh)
-	slog.Info("Notification dispatcher stopped")
+	nd.stopOnce.Do(func() {
+		close(nd.stopCh)
+		slog.Info("Notification dispatcher stopped")
+	})
 }
 
 // handleEvent processes a single agent status event.
