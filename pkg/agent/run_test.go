@@ -1060,6 +1060,106 @@ func TestBuildAgentEnv_HubEnvVarsSurviveMerge(t *testing.T) {
 	}
 }
 
+func TestBuildAgentEnv_ResolvedSecretsOverrideMissing(t *testing.T) {
+	// When a scionCfg declares a key with an empty value (e.g., GEMINI_API_KEY: "")
+	// and the key is provided by a resolved secret, buildAgentEnv should NOT
+	// report it as missing. This tests the injection that happens in Start()
+	// before calling buildAgentEnv.
+	scionCfg := &api.ScionConfig{
+		Env: map[string]string{
+			"GEMINI_API_KEY": "",
+			"OTHER_KEY":      "explicit",
+		},
+	}
+
+	// Simulate the resolved secrets injection from Start()
+	opts := api.StartOptions{
+		Env: make(map[string]string),
+		ResolvedSecrets: []api.ResolvedSecret{
+			{
+				Name:   "GEMINI_API_KEY",
+				Type:   "environment",
+				Target: "GEMINI_API_KEY",
+				Value:  "secret-api-key-value",
+				Source: "user",
+			},
+		},
+	}
+
+	// Apply the same logic as Start(): inject env-type secrets into opts.Env
+	for _, s := range opts.ResolvedSecrets {
+		if (s.Type == "environment" || s.Type == "") && s.Value != "" {
+			target := s.Target
+			if target == "" {
+				target = s.Name
+			}
+			if target != "" {
+				if _, exists := opts.Env[target]; !exists {
+					opts.Env[target] = s.Value
+				}
+			}
+		}
+	}
+
+	env, _, missingKeys := buildAgentEnv(scionCfg, opts.Env)
+
+	if len(missingKeys) != 0 {
+		t.Errorf("expected 0 missing keys, got %d: %v", len(missingKeys), missingKeys)
+	}
+
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if envMap["GEMINI_API_KEY"] != "secret-api-key-value" {
+		t.Errorf("GEMINI_API_KEY = %q, want %q", envMap["GEMINI_API_KEY"], "secret-api-key-value")
+	}
+	if envMap["OTHER_KEY"] != "explicit" {
+		t.Errorf("OTHER_KEY = %q, want %q", envMap["OTHER_KEY"], "explicit")
+	}
+}
+
+func TestBuildAgentEnv_ResolvedSecretsDoNotOverrideExplicit(t *testing.T) {
+	// When opts.Env already has a value for a key, resolved secrets should
+	// NOT override it (explicit config takes precedence over secrets).
+	opts := api.StartOptions{
+		Env: map[string]string{
+			"API_KEY": "explicit-value",
+		},
+		ResolvedSecrets: []api.ResolvedSecret{
+			{
+				Name:   "API_KEY",
+				Type:   "environment",
+				Target: "API_KEY",
+				Value:  "secret-value",
+				Source: "user",
+			},
+		},
+	}
+
+	for _, s := range opts.ResolvedSecrets {
+		if (s.Type == "environment" || s.Type == "") && s.Value != "" {
+			target := s.Target
+			if target == "" {
+				target = s.Name
+			}
+			if target != "" {
+				if _, exists := opts.Env[target]; !exists {
+					opts.Env[target] = s.Value
+				}
+			}
+		}
+	}
+
+	if opts.Env["API_KEY"] != "explicit-value" {
+		t.Errorf("API_KEY = %q, want %q (explicit should take precedence)", opts.Env["API_KEY"], "explicit-value")
+	}
+}
+
 func TestStartInjectsHubEnvFromGroveSettings(t *testing.T) {
 	// When grove settings have hub enabled with an endpoint, Start() should
 	// inject SCION_HUB_ENDPOINT and SCION_HUB_URL into the container env.

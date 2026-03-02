@@ -385,6 +385,28 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		}
 	}
 
+	// Inject environment-type resolved secrets into opts.Env so that
+	// buildAgentEnv validation sees them. Secrets are resolved by the Hub
+	// and passed in ResolvedSecrets, but buildAgentEnv only checks opts.Env.
+	// Without this, keys like GEMINI_API_KEY stored as hub secrets would
+	// fail validation even though the runtime would inject them later.
+	for _, s := range opts.ResolvedSecrets {
+		if (s.Type == "environment" || s.Type == "") && s.Value != "" {
+			target := s.Target
+			if target == "" {
+				target = s.Name
+			}
+			if target != "" {
+				if opts.Env == nil {
+					opts.Env = make(map[string]string)
+				}
+				if _, exists := opts.Env[target]; !exists {
+					opts.Env[target] = s.Value
+				}
+			}
+		}
+	}
+
 	agentEnv, envWarnings, missingEnvKeys := buildAgentEnv(finalScionCfg, opts.Env)
 	if len(missingEnvKeys) > 0 {
 		sort.Strings(missingEnvKeys)
