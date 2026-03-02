@@ -29,6 +29,9 @@ import { SSEClient } from './sse-client.js';
 import type { SSEUpdateEvent } from './sse-client.js';
 import type { Agent, Grove, RuntimeBroker } from '../shared/types.js';
 
+/** Activities that should not be overwritten by idle/empty transitions */
+const STICKY_ACTIVITIES = new Set(['waiting_for_input', 'completed', 'limits_exceeded']);
+
 /** Subscription scope matches view context */
 export type ViewScope =
   | { type: 'dashboard' }
@@ -246,6 +249,15 @@ export class StateManager extends EventTarget {
       // Merge delta into existing agent state
       const existing = this.state.agents.get(agentId) || ({} as Agent);
       const delta = data as Partial<Agent>;
+      // Preserve sticky activities: if the incoming activity is idle/empty
+      // but the existing activity is sticky, keep the existing value.
+      if (
+        delta.activity !== undefined &&
+        (delta.activity === 'idle' || delta.activity === '') &&
+        STICKY_ACTIVITIES.has(existing.activity)
+      ) {
+        delete delta.activity;
+      }
       // Ensure id is always set
       const updated = { ...existing, ...delta, id: agentId };
       // Preserve _capabilities from existing state when the delta doesn't

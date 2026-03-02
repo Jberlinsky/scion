@@ -273,18 +273,14 @@ func displayAgents(agents []api.AgentInfo, all bool, hubMode bool) error {
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	if hubMode {
-		fmt.Fprintln(w, "NAME\tTEMPLATE\tHARNESS-CFG\tRUNTIME\tGROVE\tBROKER\tSTATUS\tCONTAINER\tLAST ACTIVITY")
+		fmt.Fprintln(w, "NAME\tTEMPLATE\tHARNESS-CFG\tRUNTIME\tGROVE\tBROKER\tPHASE\tCONTAINER\tLAST ACTIVITY")
 	} else {
-		fmt.Fprintln(w, "NAME\tTEMPLATE\tHARNESS-CFG\tRUNTIME\tGROVE\tSTATUS\tCONTAINER\tLAST ACTIVITY")
+		fmt.Fprintln(w, "NAME\tTEMPLATE\tHARNESS-CFG\tRUNTIME\tGROVE\tPHASE\tCONTAINER\tLAST ACTIVITY")
 	}
 	for _, a := range agents {
-		// Display: if phase is running and activity is set, show activity; otherwise show phase.
-		agentStatus := a.Phase
-		if agentStatus == string(state.PhaseRunning) && a.Activity != "" {
-			agentStatus = a.Activity
-		}
-		if agentStatus == "" {
-			agentStatus = "IDLE"
+		phase := a.Phase
+		if phase == "" {
+			phase = "unknown"
 		}
 		containerStatus := a.ContainerStatus
 		if containerStatus == "created" && a.ID == "" {
@@ -294,16 +290,16 @@ func displayAgents(agents []api.AgentInfo, all bool, hubMode bool) error {
 		if harnessConfig == "" {
 			harnessConfig = "-"
 		}
-		lastActivity := formatLastActivity(agentStatus, a.LastSeen)
+		lastActivity := formatLastActivity(a.Activity, a.LastSeen)
 		// Use broker name if available, otherwise fall back to ID
 		broker := a.RuntimeBrokerName
 		if broker == "" {
 			broker = a.RuntimeBrokerID
 		}
 		if hubMode {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, harnessConfig, a.Runtime, a.Grove, broker, agentStatus, containerStatus, lastActivity)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, harnessConfig, a.Runtime, a.Grove, broker, phase, containerStatus, lastActivity)
 		} else {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, harnessConfig, a.Runtime, a.Grove, agentStatus, containerStatus, lastActivity)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, harnessConfig, a.Runtime, a.Grove, phase, containerStatus, lastActivity)
 		}
 	}
 	w.Flush()
@@ -352,7 +348,7 @@ func formatLastSeen(t time.Time) string {
 // formatLastActivity formats a status and timestamp as a combined "activity, time ago" string.
 func formatLastActivity(status string, t time.Time) string {
 	timePart := formatLastSeen(t)
-	if status == "" || status == "IDLE" {
+	if status == "" || status == "IDLE" || status == "idle" {
 		return timePart
 	}
 	if timePart == "-" {

@@ -83,6 +83,7 @@ func TestFormatLastActivity(t *testing.T) {
 		{"phase with time", "stopped", now.Add(-2 * time.Hour), "stopped, 2 hours ago"},
 		{"empty status with time", "", now.Add(-5 * time.Minute), "5 minutes ago"},
 		{"IDLE status with time", "IDLE", now.Add(-5 * time.Minute), "5 minutes ago"},
+		{"idle status with time", "idle", now.Add(-5 * time.Minute), "5 minutes ago"},
 		{"activity with zero time", "running", time.Time{}, "running"},
 		{"empty status with zero time", "", time.Time{}, "-"},
 	}
@@ -145,15 +146,18 @@ func TestDisplayAgentsLocalMode(t *testing.T) {
 	}
 
 	header := lines[0]
-	for _, col := range []string{"NAME", "TEMPLATE", "HARNESS-CFG", "RUNTIME", "GROVE", "STATUS", "CONTAINER", "LAST ACTIVITY"} {
+	for _, col := range []string{"NAME", "TEMPLATE", "HARNESS-CFG", "RUNTIME", "GROVE", "PHASE", "CONTAINER", "LAST ACTIVITY"} {
 		if !strings.Contains(header, col) {
 			t.Errorf("header missing column %q: %s", col, header)
 		}
 	}
 
-	// Verify first agent row has harness config value
+	// Verify first agent row has harness config value and phase column shows "running"
 	if !strings.Contains(lines[1], "claude") {
 		t.Errorf("agent-1 row should contain harness config 'claude': %s", lines[1])
+	}
+	if !strings.Contains(lines[1], "running") {
+		t.Errorf("agent-1 row should contain phase 'running': %s", lines[1])
 	}
 	if !strings.Contains(lines[1], "thinking, 30 seconds ago") {
 		t.Errorf("agent-1 row should contain 'thinking, 30 seconds ago': %s", lines[1])
@@ -203,21 +207,25 @@ func TestDisplayAgentsHubMode(t *testing.T) {
 
 	header := lines[0]
 	// Hub mode should have BROKER column
-	for _, col := range []string{"NAME", "TEMPLATE", "HARNESS-CFG", "RUNTIME", "GROVE", "BROKER", "STATUS", "CONTAINER", "LAST ACTIVITY"} {
+	for _, col := range []string{"NAME", "TEMPLATE", "HARNESS-CFG", "RUNTIME", "GROVE", "BROKER", "PHASE", "CONTAINER", "LAST ACTIVITY"} {
 		if !strings.Contains(header, col) {
 			t.Errorf("hub mode header missing column %q: %s", col, header)
 		}
 	}
 
-	// Verify agent row
+	// Verify agent row shows phase "running" and activity is not mixed in
 	if !strings.Contains(lines[1], "gemini") {
 		t.Errorf("hub agent row should contain harness config 'gemini': %s", lines[1])
 	}
 	if !strings.Contains(lines[1], "local-broker") {
 		t.Errorf("hub agent row should contain broker name: %s", lines[1])
 	}
-	if !strings.Contains(lines[1], "running, 2 minutes ago") {
-		t.Errorf("hub agent row should contain 'running, 2 minutes ago': %s", lines[1])
+	if !strings.Contains(lines[1], "running") {
+		t.Errorf("hub agent row should contain phase 'running': %s", lines[1])
+	}
+	// No activity set, so last activity should show just the timestamp
+	if !strings.Contains(lines[1], "2 minutes ago") {
+		t.Errorf("hub agent row should contain '2 minutes ago': %s", lines[1])
 	}
 }
 
