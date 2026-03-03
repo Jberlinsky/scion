@@ -230,6 +230,22 @@ The log `component` field reflects the server mode:
 | Broker only | `scion-broker` |
 | Both | `scion-server` |
 
+### Subsystem Attribute
+
+In addition to `component`, each log entry includes a `subsystem` field that identifies the internal subsystem (e.g., `hub.notifications`, `broker.agent-lifecycle`). Use this for fine-grained filtering when debugging a specific area:
+
+```bash
+# Filter local GCP-formatted logs by subsystem with jq
+SCION_LOG_GCP=true scion server start --enable-hub 2>&1 | \
+  jq 'select(.subsystem == "hub.auth")'
+
+# Show all subsystem values in the log stream
+SCION_LOG_GCP=true scion server start --enable-hub --enable-runtime-broker 2>&1 | \
+  jq -r '.subsystem // empty' | sort -u
+```
+
+See the [Observability guide](/guides/observability/#querying-logs-by-subsystem) for the full list of subsystems and Cloud Logging query examples.
+
 ## Testing Log Output
 
 To verify your logging configuration without sending to GCP:

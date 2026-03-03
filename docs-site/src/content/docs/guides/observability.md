@@ -161,6 +161,161 @@ By default, user prompts (`agent.user.prompt`) are excluded from telemetry to pr
 - **Redacted**: `prompt`, `user.email`, `tool_output`, `tool_input`
 - **Hashed**: `session_id`
 
+## Querying Logs by Subsystem
+
+Hub and Broker logs include a `subsystem` attribute that identifies the internal subsystem that produced each log entry. This is separate from the top-level `component` field (which reflects the server mode: `scion-hub`, `scion-broker`, or `scion-server`) and provides finer-grained filtering.
+
+### Available Subsystems
+
+| Subsystem | Description |
+|-----------|-------------|
+| `hub.agent-lifecycle` | Agent create, start, stop, delete, and state transitions |
+| `hub.auth` | Authentication and authorization decisions |
+| `hub.control-channel` | WebSocket lifecycle for broker connections |
+| `hub.messages` | Message routing from `scion message` to brokers |
+| `hub.notifications` | Event-driven notification dispatch and subscription matching |
+| `hub.scheduler` | Background recurring and one-shot scheduled tasks |
+| `hub.env-secrets` | Environment variable and secret management |
+| `hub.templates` | Template CRUD, hydration, and bootstrap |
+| `hub.workspace` | Git worktree sync operations |
+| `hub.dispatcher` | HTTP agent dispatch to brokers |
+| `broker.agent-lifecycle` | Container provisioning, environment resolution, template hydration |
+| `broker.control-channel` | Broker-side WebSocket connection to the hub |
+| `broker.messages` | Message injection into agent tmux sessions |
+| `broker.heartbeat` | Periodic broker status reports to hub |
+| `broker.env-secrets` | Broker-side environment gathering and finalization |
+
+In combo server mode (`scion-server`), both `hub.*` and `broker.*` subsystem logs appear in the same stream. The dotted prefix distinguishes them without requiring separate processes.
+
+### Cloud Logging Query Examples
+
+All examples assume your logs are in the `scion` log name. Adjust the `logName` filter to match your configuration.
+
+#### Filter by Server Component
+
+```
+-- All hub logs (hub-only or combo mode)
+logName="projects/YOUR_PROJECT/logs/scion"
+labels.component="scion-hub"
+
+-- All logs from combo server mode
+logName="projects/YOUR_PROJECT/logs/scion"
+labels.component="scion-server"
+```
+
+#### Filter by Subsystem
+
+```
+-- All hub subsystem logs
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem =~ "^hub\."
+
+-- All broker subsystem logs
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem =~ "^broker\."
+
+-- A specific subsystem
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem = "hub.notifications"
+```
+
+#### Agent Lifecycle Debugging
+
+```
+-- All agent lifecycle events across hub and broker
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem =~ "\.agent-lifecycle$"
+
+-- Agent lifecycle for a specific agent
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem =~ "\.agent-lifecycle$"
+jsonPayload.agent_id = "my-agent-id"
+
+-- Only errors in agent lifecycle
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem =~ "\.agent-lifecycle$"
+severity >= ERROR
+```
+
+#### Message Tracing
+
+```
+-- All message-related logs (hub routing + broker injection)
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem =~ "\.messages$"
+
+-- Messages from a specific sender
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem =~ "\.messages$"
+jsonPayload.sender = "agent-slug"
+
+-- Messages to a specific recipient in a grove
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem =~ "\.messages$"
+jsonPayload.recipient = "target-agent"
+jsonPayload.grove_id = "my-grove-id"
+```
+
+#### Auth and Security Auditing
+
+```
+-- All authentication and authorization events
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem = "hub.auth"
+
+-- Auth failures only
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem = "hub.auth"
+severity >= WARNING
+```
+
+#### Control Channel Monitoring
+
+```
+-- All control channel activity (hub + broker sides)
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem =~ "\.control-channel$"
+
+-- Control channel errors (connectivity issues)
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem =~ "\.control-channel$"
+severity >= ERROR
+```
+
+#### Operational Noise Reduction
+
+```
+-- All hub logs EXCEPT heartbeat noise
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem =~ "^hub\."
+jsonPayload.subsystem != "broker.heartbeat"
+
+-- Only high-priority subsystems (notifications, auth, agent lifecycle)
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem = "hub.notifications" OR
+jsonPayload.subsystem = "hub.auth" OR
+jsonPayload.subsystem =~ "\.agent-lifecycle$"
+```
+
+#### Combining with Time and Severity
+
+```
+-- Errors across all subsystems in the last hour
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem != ""
+severity >= ERROR
+timestamp >= "2026-03-03T00:00:00Z"
+
+-- Debug-level broker logs for troubleshooting
+logName="projects/YOUR_PROJECT/logs/scion"
+jsonPayload.subsystem =~ "^broker\."
+severity = DEBUG
+```
+
+:::tip
+Create **saved queries** in the Cloud Logging console for subsystem filters you use frequently. For alerting, use log-based metrics with a filter like `jsonPayload.subsystem = "hub.notifications" AND severity >= ERROR` to trigger alerts on notification dispatch failures.
+:::
+
 ## Troubleshooting for Admins
 
 ### Logs Not Appearing in GCP
