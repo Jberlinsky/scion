@@ -671,6 +671,10 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 
 		if !enableWeb {
 			// Hub runs its own HTTP server (standalone mode).
+			// Create event publisher for notification dispatcher and event-driven features.
+			eventPub := hub.NewChannelEventPublisher()
+			hubSrv.SetEventPublisher(eventPub)
+
 			log.Printf("Starting Hub API server on %s:%d", cfg.Hub.Host, cfg.Hub.Port)
 			wg.Add(1)
 			go func() {
