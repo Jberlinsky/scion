@@ -239,15 +239,7 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	// 3. Propagate credentials
 	var auth api.AuthConfig
 	if !opts.NoAuth {
-		if opts.Auth != nil {
-			auth, err = opts.Auth.GetAuthConfig(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get auth: %w", err)
-			}
-		} else {
-			// Fallback to legacy discovery if no harness given
-			auth = h.DiscoverAuth(agentHome)
-		}
+		auth = h.DiscoverAuth(agentHome)
 	}
 
 	// 4. Launch container

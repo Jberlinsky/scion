@@ -106,10 +106,6 @@ func (g *GeminiCLI) GetEnv(agentName string, agentHome string, unixUsername stri
 	if auth.GoogleAPIKey != "" {
 		env["GOOGLE_API_KEY"] = auth.GoogleAPIKey
 	}
-	if auth.VertexAPIKey != "" {
-		env["VERTEX_API_KEY"] = auth.VertexAPIKey
-	}
-
 	if auth.SelectedType != "" {
 		switch auth.SelectedType {
 		case "gemini-api-key":
@@ -123,8 +119,6 @@ func (g *GeminiCLI) GetEnv(agentName string, agentHome string, unixUsername stri
 		// Legacy/Fallback behavior when SelectedType is not explicitly set
 		if auth.GeminiAPIKey != "" || auth.GoogleAPIKey != "" {
 			env["GEMINI_DEFAULT_AUTH_TYPE"] = "gemini-api-key"
-		} else if auth.VertexAPIKey != "" {
-			env["GEMINI_DEFAULT_AUTH_TYPE"] = "vertex-ai"
 		}
 	}
 

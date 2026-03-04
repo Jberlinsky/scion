@@ -76,13 +76,22 @@ func TestCodexAuthPropagation(t *testing.T) {
 func TestCodexGetEnv(t *testing.T) {
 	c := &Codex{}
 
-	// Test OPENAI_API_KEY passthrough
-	os.Setenv("OPENAI_API_KEY", "test-key")
-	defer os.Unsetenv("OPENAI_API_KEY")
-
-	env := c.GetEnv("test-agent", "/tmp", "user", api.AuthConfig{})
+	// Test OPENAI_API_KEY from AuthConfig
+	env := c.GetEnv("test-agent", "/tmp", "user", api.AuthConfig{OpenAIAPIKey: "test-key"})
 	if env["OPENAI_API_KEY"] != "test-key" {
 		t.Errorf("expected OPENAI_API_KEY to be 'test-key', got '%s'", env["OPENAI_API_KEY"])
+	}
+
+	// Test CODEX_API_KEY from AuthConfig
+	env = c.GetEnv("test-agent", "/tmp", "user", api.AuthConfig{CodexAPIKey: "codex-key"})
+	if env["CODEX_API_KEY"] != "codex-key" {
+		t.Errorf("expected CODEX_API_KEY to be 'codex-key', got '%s'", env["CODEX_API_KEY"])
+	}
+
+	// Test empty AuthConfig produces no env
+	env = c.GetEnv("test-agent", "/tmp", "user", api.AuthConfig{})
+	if len(env) != 0 {
+		t.Errorf("expected empty env for empty AuthConfig, got %v", env)
 	}
 }
 

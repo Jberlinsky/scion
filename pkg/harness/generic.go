@@ -84,9 +84,6 @@ func (g *Generic) GetEnv(agentName string, agentHome string, unixUsername string
 	if auth.GoogleAPIKey != "" {
 		env["GOOGLE_API_KEY"] = auth.GoogleAPIKey
 	}
-	if auth.VertexAPIKey != "" {
-		env["VERTEX_API_KEY"] = auth.VertexAPIKey
-	}
 	if auth.GoogleCloudProject != "" {
 		env["GOOGLE_CLOUD_PROJECT"] = auth.GoogleCloudProject
 	}

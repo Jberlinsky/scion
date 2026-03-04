@@ -45,11 +45,11 @@ func (c *Codex) DiscoverAuth(agentHome string) api.AuthConfig {
 
 func (c *Codex) GetEnv(agentName string, agentHome string, unixUsername string, auth api.AuthConfig) map[string]string {
 	env := make(map[string]string)
-	if os.Getenv("OPENAI_API_KEY") != "" {
-		env["OPENAI_API_KEY"] = os.Getenv("OPENAI_API_KEY")
+	if auth.OpenAIAPIKey != "" {
+		env["OPENAI_API_KEY"] = auth.OpenAIAPIKey
 	}
-	if os.Getenv("CODEX_API_KEY") != "" {
-		env["CODEX_API_KEY"] = os.Getenv("CODEX_API_KEY")
+	if auth.CodexAPIKey != "" {
+		env["CODEX_API_KEY"] = auth.CodexAPIKey
 	}
 	return env
 }

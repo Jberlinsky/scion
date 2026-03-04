@@ -1,6 +1,6 @@
 # Agent Auth Refactor
 
-## Status: Reviewed
+## Status: In Progress (Phase 1-2 Complete)
 
 ## Problem Statement
 
@@ -297,16 +297,16 @@ For file-type secrets, the Hub stores base64-encoded content and the runtime pro
 
 ## Implementation Plan
 
-### Step 1: Expand AuthConfig
+### Step 1: Expand AuthConfig ✅
 - Add `GoogleCloudRegion`, `OpenAIAPIKey`, `CodexAPIKey`
 - Remove `VertexAPIKey` outright (search for all references, delete them; no migration/deprecation path)
 - Remove `AuthProvider` interface from `pkg/api/types.go`
 - Update all test fixtures
+- Moved Codex/OpenCode `GetEnv()` from direct `os.Getenv()` to `AuthConfig` fields
 
-### Step 2: Create GatherAuth
+### Step 2: Create GatherAuth ✅
 - Implement `GatherAuth()` in `pkg/harness/auth.go`
-- Add settings overlay function
-- Write tests
+- Write tests (env vars, project/region fallbacks, file discovery, precedence)
 
 ### Step 3: Implement ResolveAuth Per Harness
 - Add `ResolveAuth(AuthConfig) (*ResolvedAuth, error)` to Harness interface

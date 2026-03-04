@@ -50,8 +50,8 @@ func (o *OpenCode) GetEnv(agentName string, agentHome string, unixUsername strin
 	if auth.AnthropicAPIKey != "" {
 		env["ANTHROPIC_API_KEY"] = auth.AnthropicAPIKey
 	}
-	if os.Getenv("OPENAI_API_KEY") != "" {
-		env["OPENAI_API_KEY"] = os.Getenv("OPENAI_API_KEY")
+	if auth.OpenAIAPIKey != "" {
+		env["OPENAI_API_KEY"] = auth.OpenAIAPIKey
 	}
 	return env
 }

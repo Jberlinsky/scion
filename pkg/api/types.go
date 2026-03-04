@@ -297,20 +297,25 @@ func (c *ScionConfig) IsDetached() bool {
 }
 
 type AuthConfig struct {
+	// Google/Gemini auth
 	GeminiAPIKey         string
 	GoogleAPIKey         string
-	VertexAPIKey         string
 	GoogleAppCredentials string
 	GoogleCloudProject   string
+	GoogleCloudRegion    string
 	OAuthCreds           string
-	AnthropicAPIKey      string
-	OpenCodeAuthFile     string
-	CodexAuthFile        string
-	SelectedType         string
-}
 
-type AuthProvider interface {
-	GetAuthConfig(context.Context) (AuthConfig, error)
+	// Anthropic auth
+	AnthropicAPIKey string
+
+	// OpenAI/Codex auth
+	OpenAIAPIKey    string
+	CodexAPIKey     string
+	CodexAuthFile   string
+	OpenCodeAuthFile string
+
+	// Auth mode selection
+	SelectedType string
 }
 
 // AgentInfo contains metadata about a scion agent.
@@ -441,7 +446,6 @@ type StartOptions struct {
 	ResolvedSecrets []ResolvedSecret
 	Detached        *bool
 	Resume          bool
-	Auth            AuthProvider
 	NoAuth          bool
 	Branch          string
 	Workspace       string

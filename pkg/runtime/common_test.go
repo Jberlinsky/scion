@@ -141,7 +141,6 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				Name: "test-agent",
 				Auth: api.AuthConfig{
 					GoogleAPIKey:       "google-123",
-					VertexAPIKey:       "vertex-123",
 					GoogleCloudProject: "my-project",
 				},
 				Env:   []string{"GEMINI_MODEL=gemini-1.5-pro"},
@@ -149,7 +148,6 @@ func TestBuildCommonRunArgs(t *testing.T) {
 			},
 			wantIn: []string{
 				"-e GOOGLE_API_KEY=google-123",
-				"-e VERTEX_API_KEY=vertex-123",
 				"-e GOOGLE_CLOUD_PROJECT=my-project",
 				"-e GEMINI_MODEL=gemini-1.5-pro",
 			},
