@@ -570,6 +570,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			SoftDeleteRetainFiles: cfg.Hub.SoftDeleteRetainFiles,
 			AdminMode:            adminMode,
 			MaintenanceMessage:   maintenanceMessage,
+			TelemetryDefault:     cfg.TelemetryEnabled,
 			BrokerAuthConfig:     hub.DefaultBrokerAuthConfig(), // Enable broker HMAC authentication
 			OAuthConfig: hub.OAuthConfig{
 				Web: hub.OAuthClientConfig{

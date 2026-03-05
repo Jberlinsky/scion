@@ -52,6 +52,9 @@ export class ScionPageAgentCreate extends LitElement {
   @state()
   private notify = true;
 
+  @state()
+  private telemetryEnabled = false;
+
   /** Whether the groveId was explicitly passed via URL query param (user navigated from grove page) */
   private groveFromUrl = false;
 
@@ -265,10 +268,11 @@ export class ScionPageAgentCreate extends LitElement {
     this.error = null;
 
     try {
-      const [grovesRes, brokersRes, templatesRes] = await Promise.all([
+      const [grovesRes, brokersRes, templatesRes, settingsRes] = await Promise.all([
         fetch('/api/v1/groves', { credentials: 'include' }),
         fetch('/api/v1/runtime-brokers', { credentials: 'include' }),
         fetch('/api/v1/templates?status=active', { credentials: 'include' }),
+        fetch('/api/v1/settings/public', { credentials: 'include' }),
       ]);
 
       if (grovesRes.ok) {
@@ -284,6 +288,11 @@ export class ScionPageAgentCreate extends LitElement {
       if (templatesRes.ok) {
         const data = (await templatesRes.json()) as { templates?: Template[] } | Template[];
         this.templates = Array.isArray(data) ? data : data.templates || [];
+      }
+
+      if (settingsRes.ok) {
+        const data = (await settingsRes.json()) as { telemetryEnabled?: boolean };
+        this.telemetryEnabled = data.telemetryEnabled ?? false;
       }
 
       // Auto-select first grove if none selected
@@ -346,6 +355,13 @@ export class ScionPageAgentCreate extends LitElement {
       if (this.task.trim()) {
         body.task = this.task.trim();
       }
+
+      // Pass telemetry preference via config env, matching CLI behavior
+      body.config = {
+        env: {
+          SCION_TELEMETRY_ENABLED: this.telemetryEnabled ? 'true' : 'false',
+        },
+      };
 
       const response = await fetch('/api/v1/agents', {
         method: 'POST',
@@ -588,6 +604,23 @@ export class ScionPageAgentCreate extends LitElement {
             </sl-checkbox>
             <sl-tooltip
               content="You will be notified when this agent reaches: Completed, Waiting for Input, or Limits Exceeded."
+              hoist
+            >
+              <span class="help-badge">?</span>
+            </sl-tooltip>
+          </div>
+
+          <div class="notify-field">
+            <sl-checkbox
+              ?checked=${this.telemetryEnabled}
+              @sl-change=${(e: Event) => {
+                this.telemetryEnabled = (e.target as HTMLInputElement).checked;
+              }}
+            >
+              Enable Telemetry
+            </sl-checkbox>
+            <sl-tooltip
+              content="Collect telemetry data for this agent. The default reflects the global telemetry setting."
               hoist
             >
               <span class="help-badge">?</span>

@@ -174,6 +174,10 @@ type GlobalConfig struct {
 	// Admin mode settings
 	AdminMode          bool   `json:"adminMode" yaml:"adminMode" koanf:"adminMode"`
 	MaintenanceMessage string `json:"maintenanceMessage" yaml:"maintenanceMessage" koanf:"maintenanceMessage"`
+
+	// Telemetry default — when set, the Hub exposes this as the default telemetry opt-in
+	// state for new agents via GET /api/v1/settings/public.
+	TelemetryEnabled *bool `json:"telemetryEnabled,omitempty" yaml:"telemetryEnabled,omitempty" koanf:"telemetryEnabled"`
 }
 
 // SecretsConfig holds configuration for the secrets backend.

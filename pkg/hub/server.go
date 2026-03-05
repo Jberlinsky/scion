@@ -98,6 +98,9 @@ type ServerConfig struct {
 	AdminMode bool
 	// MaintenanceMessage is the custom message shown during admin mode.
 	MaintenanceMessage string
+	// TelemetryDefault is the default telemetry enabled state for new agents.
+	// Exposed via GET /api/v1/settings/public so the web UI can pre-populate the checkbox.
+	TelemetryDefault *bool
 }
 
 // DefaultServerConfig returns the default server configuration.
@@ -1199,6 +1202,9 @@ func (s *Server) registerRoutes() {
 
 	// WebSocket control channel endpoint for Runtime Brokers
 	s.mux.HandleFunc("/api/v1/runtime-brokers/connect", s.handleRuntimeBrokerConnect)
+
+	// Public settings endpoint (no auth required for telemetry default, etc.)
+	s.mux.HandleFunc("/api/v1/settings/public", s.handlePublicSettings)
 }
 
 // applyMiddleware wraps the handler with middleware.
