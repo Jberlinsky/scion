@@ -906,6 +906,7 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 	// Build start options
 	opts := api.StartOptions{
 		Name:          id,
+		BrokerMode:    true,
 		Task:          startReq.Task,
 		HarnessConfig: startReq.HarnessConfig,
 	}
@@ -1558,9 +1559,10 @@ func (s *Server) finalizeEnv(w http.ResponseWriter, r *http.Request, id string) 
 	// Build start options from the pending request
 	origReq := pending.Request
 	opts := api.StartOptions{
-		Name:      origReq.Name,
-		Detached:  boolPtr(!origReq.Attach),
-		GrovePath: origReq.GrovePath,
+		Name:       origReq.Name,
+		BrokerMode: true,
+		Detached:   boolPtr(!origReq.Attach),
+		GrovePath:  origReq.GrovePath,
 	}
 
 	if origReq.Config != nil {
