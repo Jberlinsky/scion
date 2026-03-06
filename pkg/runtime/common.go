@@ -264,6 +264,17 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 		}
 	}
 
+	// Dev-mode sciontool override: if SCION_DEV_SCIONTOOL points to a local
+	// binary, bind-mount it over /usr/local/bin/sciontool in the container.
+	// This allows rapid iteration on sciontool without rebuilding images.
+	if devSciontool := os.Getenv("SCION_DEV_SCIONTOOL"); devSciontool != "" {
+		if abs, err := filepath.Abs(devSciontool); err == nil {
+			if _, err := os.Stat(abs); err == nil {
+				registerMount(abs, "/usr/local/bin/sciontool", true, true)
+			}
+		}
+	}
+
 	// Add all registered volumes
 	for _, tgt := range volumeOrder {
 		addArg("-v", volumeMap[tgt])

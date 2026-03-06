@@ -52,6 +52,16 @@ web:
 	@cd web && npm install && npm run build
 	@echo "Web frontend built."
 
+## build-sciontool: Cross-compile sciontool for Linux (for dev-mounting into containers)
+build-sciontool:
+	@echo "Building sciontool for Linux..."
+	@mkdir -p $(BUILD_DIR)
+	@GOOS=linux GOARCH=$$(if [ "$$(uname -m)" = "x86_64" ]; then echo amd64; else echo arm64; fi) \
+		CGO_ENABLED=0 go build -buildvcs=false -ldflags "$(LDFLAGS)" \
+		-o $(BUILD_DIR)/sciontool-linux ./cmd/sciontool
+	@echo "Binary: $(BUILD_DIR)/sciontool-linux"
+	@echo "Usage:  export SCION_DEV_SCIONTOOL=$(BUILD_DIR)/sciontool-linux"
+
 ## clean: Remove build artifacts
 clean:
 	@echo "Cleaning..."
