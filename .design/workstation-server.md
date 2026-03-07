@@ -274,14 +274,14 @@ This would probe the health endpoints (`/healthz`) on the known ports, and check
 
 ## Implementation Plan
 
-### Phase 1: Daemon Lifecycle (cmd/server.go, pkg/daemon)
+### Phase 1: Daemon Lifecycle (cmd/server.go, pkg/daemon) ✅ COMPLETE
 
-1. **Generalize `pkg/daemon`**: Parameterize PID/log filenames by component name.
-2. **Add `--foreground` flag** to `scion server start` (default: false, daemon mode).
-3. **Add `scion server stop`**: Read `server.pid`, send SIGTERM.
-4. **Add `scion server restart`**: Stop + start.
-5. **Add `scion server status`**: Daemon status + health checks.
-6. **Invert default**: `scion server start` runs as daemon unless `--foreground`.
+1. ✅ **Generalize `pkg/daemon`**: Parameterize PID/log filenames by component name (`PIDFileName`, `LogFileName`, `StartComponent`, `StopComponent`, `StatusComponent`, etc.). Legacy broker-specific functions preserved as thin wrappers.
+2. ✅ **Add `--foreground` flag** to `scion server start` (default: false, daemon mode).
+3. ✅ **Add `scion server stop`**: Read `server.pid`, send SIGTERM.
+4. ✅ **Add `scion server restart`**: Stop + start with new binary.
+5. ✅ **Add `scion server status`**: Daemon status + component health checks (probes Hub, Broker, Web endpoints).
+6. ✅ **Invert default**: `scion server start` runs as daemon unless `--foreground`.
 
 ### Phase 2: Default Workstation Mode (cmd/server.go)
 
