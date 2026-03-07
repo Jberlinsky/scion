@@ -220,6 +220,18 @@ type V1ServerConfig struct {
 	Secrets   *V1SecretsConfig    `json:"secrets,omitempty" yaml:"secrets,omitempty" koanf:"secrets"`
 	LogLevel  string              `json:"log_level,omitempty" yaml:"log_level,omitempty" koanf:"log_level"`
 	LogFormat string              `json:"log_format,omitempty" yaml:"log_format,omitempty" koanf:"log_format"`
+
+	// NotificationChannels configures external notification delivery channels.
+	// Secrets (webhook URLs, API tokens) are held in memory only — never persisted to a database.
+	NotificationChannels []V1NotificationChannelConfig `json:"notification_channels,omitempty" yaml:"notification_channels,omitempty" koanf:"notification_channels"`
+}
+
+// V1NotificationChannelConfig holds configuration for an external notification channel.
+type V1NotificationChannelConfig struct {
+	Type             string            `json:"type" yaml:"type" koanf:"type"`
+	Params           map[string]string `json:"params,omitempty" yaml:"params,omitempty" koanf:"params"`
+	FilterTypes      []string          `json:"filter_types,omitempty" yaml:"filter_types,omitempty" koanf:"filter_types"`
+	FilterUrgentOnly bool              `json:"filter_urgent_only,omitempty" yaml:"filter_urgent_only,omitempty" koanf:"filter_urgent_only"`
 }
 
 // V1ServerHubConfig holds the Hub API server settings (when running scion-server).

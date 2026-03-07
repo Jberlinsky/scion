@@ -388,6 +388,9 @@ type Server struct {
 
 	logQueryService *LogQueryService // Cloud Logging query service (nil = disabled)
 
+	// Channel registry for external notification delivery (nil = disabled)
+	channelRegistry *ChannelRegistry
+
 	// Dedicated request logger (nil = disabled)
 	requestLogger *slog.Logger
 
@@ -691,6 +694,15 @@ func (s *Server) SetMessageLogger(l *slog.Logger) {
 	s.dedicatedMessageLog = l
 }
 
+// SetChannelRegistry sets the notification channel registry for external delivery.
+// When set, user notifications are also dispatched to configured external channels
+// (webhook, Slack, etc.) in addition to the standard SSE pipeline.
+func (s *Server) SetChannelRegistry(r *ChannelRegistry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.channelRegistry = r
+}
+
 // logMessage logs a message dispatch event to the dedicated message logger
 // (if configured) and the standard subsystem message logger.
 func (s *Server) logMessage(msg string, attrs ...any) {
@@ -823,6 +835,7 @@ func (s *Server) StartNotificationDispatcher() {
 
 	nd := NewNotificationDispatcher(s.store, ep, s.GetDispatcher, logging.Subsystem("hub.notifications"))
 	nd.messageLog = s.dedicatedMessageLog
+	nd.channelRegistry = s.channelRegistry
 	s.notificationDispatcher = nd
 	s.notificationDispatcher.Start()
 }

@@ -32,14 +32,15 @@ import (
 // notification subscriptions, stores notification records, and dispatches
 // messages to subscriber agents.
 type NotificationDispatcher struct {
-	store         store.Store
-	events        *ChannelEventPublisher
-	getDispatcher func() AgentDispatcher // lazy getter; dispatcher may be set after startup
-	log           *slog.Logger
-	messageLog    *slog.Logger // dedicated message audit logger (nil = disabled)
-	stopCh        chan struct{}
-	stopOnce      sync.Once
-	wg            sync.WaitGroup
+	store            store.Store
+	events           *ChannelEventPublisher
+	getDispatcher    func() AgentDispatcher // lazy getter; dispatcher may be set after startup
+	log              *slog.Logger
+	messageLog       *slog.Logger       // dedicated message audit logger (nil = disabled)
+	channelRegistry  *ChannelRegistry   // external notification channels (nil = disabled)
+	stopCh           chan struct{}
+	stopOnce         sync.Once
+	wg               sync.WaitGroup
 }
 
 // NewNotificationDispatcher creates a new NotificationDispatcher.
@@ -189,6 +190,9 @@ func (nd *NotificationDispatcher) storeAndDispatch(ctx context.Context, sub *sto
 		nd.events.PublishNotification(ctx, notif)
 		nd.log.Info("Notification dispatched to user via SSE",
 			"subscriberID", sub.SubscriberID, "notificationID", notif.ID)
+
+		// Dispatch to external notification channels (fire-and-forget)
+		nd.dispatchToChannels(ctx, sub, notif, agent.Slug)
 	default:
 		nd.log.Warn("Unknown subscriber type", "type", sub.SubscriberType)
 	}
@@ -264,6 +268,25 @@ func notificationMessageType(status string) string {
 		return messages.TypeInputNeeded
 	}
 	return messages.TypeStateChange
+}
+
+// dispatchToChannels sends a notification to all configured external notification
+// channels. This is fire-and-forget; errors are logged but do not affect the
+// notification pipeline.
+func (nd *NotificationDispatcher) dispatchToChannels(ctx context.Context, sub *store.NotificationSubscription, notif *store.Notification, watchedSlug string) {
+	if nd.channelRegistry == nil || nd.channelRegistry.Len() == 0 {
+		return
+	}
+
+	msgType := notificationMessageType(notif.Status)
+	structuredMsg := messages.NewNotification(
+		"agent:"+watchedSlug,
+		"user:"+sub.SubscriberID,
+		notif.Message,
+		msgType,
+	)
+
+	nd.channelRegistry.Dispatch(ctx, structuredMsg)
 }
 
 // formatNotificationMessage formats a notification message based on agent state and status.

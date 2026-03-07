@@ -882,13 +882,15 @@ If a new CLI sends a `StructuredMessage` to an old Hub:
 - ✅ Notification dispatcher logs notification message dispatch to dedicated message logger
 - ✅ `StructuredMessage.LogAttrs()` helper for consistent log attribute extraction
 
-### Phase 4: Notification Channels
-- Define `NotificationChannel` interface
-- Implement webhook channel
-- Add notification channel configuration to the core settings schema
-- Load channel configs at Hub startup, hold secrets in memory only
-- Wire channel dispatch into `NotificationDispatcher`
-- Implement Slack channel adapter
+### Phase 4: Notification Channels ✅ COMPLETE
+- ✅ Define `NotificationChannel` interface (`pkg/hub/channels.go`)
+- ✅ Implement webhook channel (`pkg/hub/channels_webhook.go`) — POSTs structured message JSON to configured URL with custom headers
+- ✅ Add notification channel configuration to the core settings schema (`V1NotificationChannelConfig` in `pkg/config/settings_v1.go` under `server.notification_channels`)
+- ✅ Load channel configs at Hub startup, hold secrets in memory only (`cmd/server.go` loads from `LoadVersionedSettings`)
+- ✅ Wire channel dispatch into `NotificationDispatcher` — user subscriber notifications dispatched to all matching channels via `ChannelRegistry`
+- ✅ Implement Slack channel adapter (`pkg/hub/channels_slack.go`) — formats messages with emoji, urgency mentions, and type indicators
+- ✅ `ChannelRegistry` provides filter support: `filter_types` (message type whitelist) and `filter_urgent_only` (urgent-only gating)
+- ✅ Channel dispatch is fire-and-forget — delivery failures logged but do not block notification pipeline
 
 ### Phase 5: Message Broker Adapter Layer
 - Define `MessageBroker` interface
@@ -946,10 +948,12 @@ If a new CLI sends a `StructuredMessage` to an old Hub:
 - `web/src/components/shared/notification-tray.ts` - Parse structured message format
 - `web/src/client/api.ts` - Update notification types
 
-### Notification Channels (New)
-- `pkg/hub/channels.go` (new) - Channel interface, registry, dispatch
-- `pkg/hub/channels_webhook.go` (new) - Webhook channel implementation
-- Settings schema update - Add `notification_channels` configuration section
+### Notification Channels
+- `pkg/hub/channels.go` - `NotificationChannel` interface, `ChannelConfig`, `ChannelRegistry` with filter-based dispatch
+- `pkg/hub/channels_webhook.go` - Webhook channel: POSTs structured message JSON to configured URL
+- `pkg/hub/channels_slack.go` - Slack channel: incoming webhook with emoji formatting and urgency mentions
+- `pkg/hub/channels_test.go` - Tests for channel registry, webhook, and Slack channels
+- `pkg/config/settings_v1.go` - `V1NotificationChannelConfig` on `V1ServerConfig.NotificationChannels`
 
 ### Message Broker (New)
 - `pkg/broker/broker.go` (new) - Broker interface

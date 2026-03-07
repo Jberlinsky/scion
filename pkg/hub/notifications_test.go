@@ -798,6 +798,73 @@ func TestNotificationDispatcher_ErrorPhase(t *testing.T) {
 	assert.Equal(t, "ERROR", notifs[0].Status)
 }
 
+func TestNotificationDispatcher_ChannelDispatchOnUserNotification(t *testing.T) {
+	env := setupNotificationTest(t)
+
+	// Replace the agent subscription with a user subscription
+	require.NoError(t, env.store.DeleteNotificationSubscription(context.Background(), env.sub.ID))
+	userSub := &store.NotificationSubscription{
+		ID:                api.NewUUID(),
+		AgentID:           env.watched.ID,
+		SubscriberType:    store.SubscriberTypeUser,
+		SubscriberID:      "user-123",
+		GroveID:           env.grove.ID,
+		TriggerActivities: []string{"COMPLETED"},
+		CreatedAt:         time.Now(),
+		CreatedBy:         "test",
+	}
+	require.NoError(t, env.store.CreateNotificationSubscription(context.Background(), userSub))
+
+	// Set up a recording channel via the registry
+	ch := &recordingChannel{name: "test-channel"}
+	env.nd.channelRegistry = &ChannelRegistry{
+		channels: []NotificationChannel{ch},
+		configs:  []ChannelConfig{{Type: "test-channel"}},
+		log:      slog.Default(),
+	}
+
+	env.nd.Start()
+	defer env.nd.Stop()
+
+	env.publishStatus("completed")
+
+	// Wait for processing
+	require.Eventually(t, func() bool {
+		return len(ch.getDeliveries()) == 1
+	}, 2*time.Second, 50*time.Millisecond)
+
+	deliveries := ch.getDeliveries()
+	assert.Equal(t, "agent:watched-agent", deliveries[0].Sender)
+	assert.Equal(t, "user:user-123", deliveries[0].Recipient)
+	assert.Equal(t, messages.TypeStateChange, deliveries[0].Type)
+	assert.Contains(t, deliveries[0].Msg, "watched-agent has reached a state of COMPLETED")
+}
+
+func TestNotificationDispatcher_NoChannelDispatchForAgentSubscriber(t *testing.T) {
+	env := setupNotificationTest(t)
+
+	// Set up a recording channel — should NOT receive anything for agent subscribers
+	ch := &recordingChannel{name: "test-channel"}
+	env.nd.channelRegistry = &ChannelRegistry{
+		channels: []NotificationChannel{ch},
+		configs:  []ChannelConfig{{Type: "test-channel"}},
+		log:      slog.Default(),
+	}
+
+	env.nd.Start()
+	defer env.nd.Stop()
+
+	env.publishStatus("completed")
+
+	// Wait for agent dispatch
+	require.Eventually(t, func() bool {
+		return len(env.dispatcher.getCalls()) == 1
+	}, 2*time.Second, 50*time.Millisecond)
+
+	// Channel should not have been called for agent subscriber
+	assert.Empty(t, ch.getDeliveries())
+}
+
 func TestNotificationDispatcher_ErrorPhaseNotMatchedWithoutSubscription(t *testing.T) {
 	env := setupNotificationTest(t)
 

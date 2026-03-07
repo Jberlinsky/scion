@@ -1164,6 +1164,22 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			hubSrv.SetMessageLogger(messageLogger)
 		}
 
+		// Load notification channels from versioned settings
+		if vs, err := config.LoadVersionedSettings(""); err == nil && vs.Server != nil && len(vs.Server.NotificationChannels) > 0 {
+			channelConfigs := make([]hub.ChannelConfig, len(vs.Server.NotificationChannels))
+			for i, c := range vs.Server.NotificationChannels {
+				channelConfigs[i] = hub.ChannelConfig{
+					Type:             c.Type,
+					Params:           c.Params,
+					FilterTypes:      c.FilterTypes,
+					FilterUrgentOnly: c.FilterUrgentOnly,
+				}
+			}
+			registry := hub.NewChannelRegistry(channelConfigs, logging.Subsystem("hub.notification-channels"))
+			hubSrv.SetChannelRegistry(registry)
+			log.Printf("Notification channels configured: %d channel(s) registered", registry.Len())
+		}
+
 		// Initialize storage if configured
 		if storageBucket != "" {
 			log.Printf("Initializing GCS storage with bucket: %s", storageBucket)
