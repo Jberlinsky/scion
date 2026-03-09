@@ -17,6 +17,8 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ptone/scion-agent/pkg/k8s/api/v1alpha1"
@@ -79,5 +81,147 @@ unstructuredMap, _ := k8sruntime.DefaultUnstructuredConverter.ToUnstructured(cla
 
 	if len(list.Items) != 1 {
 		t.Errorf("expected 1 item, got %d", len(list.Items))
+	}
+}
+
+// --- Stage 3: Context support tests ---
+
+func writeTestKubeconfig(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kubeconfig")
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestNewClientWithContext_EmptyContext(t *testing.T) {
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://127.0.0.1:6443
+  name: test-cluster
+contexts:
+- context:
+    cluster: test-cluster
+    user: test-user
+  name: test-context
+current-context: test-context
+users:
+- name: test-user
+  user:
+    token: fake-token
+`
+	path := writeTestKubeconfig(t, kubeconfig)
+
+	client, err := NewClientWithContext(path, "")
+	if err != nil {
+		t.Fatalf("NewClientWithContext failed: %v", err)
+	}
+
+	if client.CurrentContext != "test-context" {
+		t.Errorf("expected CurrentContext 'test-context', got %q", client.CurrentContext)
+	}
+}
+
+func TestNewClientWithContext_SpecificContext(t *testing.T) {
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://127.0.0.1:6443
+  name: cluster-a
+- cluster:
+    server: https://127.0.0.1:7443
+  name: cluster-b
+contexts:
+- context:
+    cluster: cluster-a
+    user: user-a
+  name: context-a
+- context:
+    cluster: cluster-b
+    user: user-b
+  name: context-b
+current-context: context-a
+users:
+- name: user-a
+  user:
+    token: fake-token-a
+- name: user-b
+  user:
+    token: fake-token-b
+`
+	path := writeTestKubeconfig(t, kubeconfig)
+
+	client, err := NewClientWithContext(path, "context-b")
+	if err != nil {
+		t.Fatalf("NewClientWithContext failed: %v", err)
+	}
+
+	if client.CurrentContext != "context-b" {
+		t.Errorf("expected CurrentContext 'context-b', got %q", client.CurrentContext)
+	}
+
+	if client.Config.Host != "https://127.0.0.1:7443" {
+		t.Errorf("expected host 'https://127.0.0.1:7443', got %q", client.Config.Host)
+	}
+}
+
+func TestNewClientWithContext_InvalidContext(t *testing.T) {
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://127.0.0.1:6443
+  name: test-cluster
+contexts:
+- context:
+    cluster: test-cluster
+    user: test-user
+  name: test-context
+current-context: test-context
+users:
+- name: test-user
+  user:
+    token: fake-token
+`
+	path := writeTestKubeconfig(t, kubeconfig)
+
+	_, err := NewClientWithContext(path, "nonexistent-context")
+	if err == nil {
+		t.Error("expected error for nonexistent context")
+	}
+}
+
+func TestNewClient_BackwardsCompatible(t *testing.T) {
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://127.0.0.1:6443
+  name: test-cluster
+contexts:
+- context:
+    cluster: test-cluster
+    user: test-user
+  name: test-context
+current-context: test-context
+users:
+- name: test-user
+  user:
+    token: fake-token
+`
+	path := writeTestKubeconfig(t, kubeconfig)
+
+	client, err := NewClient(path)
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+
+	if client.CurrentContext != "test-context" {
+		t.Errorf("expected CurrentContext 'test-context', got %q", client.CurrentContext)
 	}
 }

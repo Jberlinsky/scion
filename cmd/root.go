@@ -76,7 +76,7 @@ return an error instead of blocking.`,
 
 		requiresGrove := true
 		switch cmdName {
-		case "help", "version", "completion", "server":
+		case "help", "version", "completion", "server", "doctor":
 			requiresGrove = false
 		case "init":
 			// Both top-level init and grove init don't require existing grove
@@ -128,7 +128,7 @@ return an error instead of blocking.`,
 		// Skip for config commands (users need those to set the registry).
 		requiresRegistry := requiresGrove
 		switch cmdName {
-		case "config":
+		case "config", "doctor":
 			requiresRegistry = false
 		}
 		if parentName == "config" {

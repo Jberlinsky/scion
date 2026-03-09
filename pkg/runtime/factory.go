@@ -112,14 +112,11 @@ func GetRuntime(grovePath string, profileName string) Runtime {
 		}
 		return pr
 	case "kubernetes", "k8s":
-		k8sClient, err := k8s.NewClient(os.Getenv("KUBECONFIG"))
+		k8sClient, err := k8s.NewClientWithContext(os.Getenv("KUBECONFIG"), rtConfig.Context)
 		if err != nil {
 			return &ErrorRuntime{Err: err}
 		}
 		rt := NewKubernetesRuntime(k8sClient)
-		if rtConfig.Context != "" {
-			// Need to support context switching in k8s client
-		}
 		if rtConfig.Namespace != "" {
 			rt.DefaultNamespace = rtConfig.Namespace
 		}

@@ -32,6 +32,7 @@ const (
 	Blue   = "\033[34m"
 	Black  = "\033[30m"
 	BgRed  = "\033[41m"
+	Gray   = "\033[90m"
 )
 
 // GetBanner returns the refined ASCII art banner

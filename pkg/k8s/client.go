@@ -46,19 +46,32 @@ type Client struct {
 	CurrentContext string
 }
 
+// NewClient creates a Kubernetes client using the default or specified kubeconfig.
+// It uses the current context from the kubeconfig unless overridden via NewClientWithContext.
 func NewClient(kubeconfigPath string) (*Client, error) {
+	return NewClientWithContext(kubeconfigPath, "")
+}
+
+// NewClientWithContext creates a Kubernetes client targeting a specific context.
+// If contextName is empty, the current context from the kubeconfig is used.
+func NewClientWithContext(kubeconfigPath, contextName string) (*Client, error) {
 	var config *rest.Config
 	var err error
 	var currentContext string
 
-	// Always try to load via DeferredLoadingClientConfig to get metadata like current context
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	if kubeconfigPath != "" {
 		loadingRules.ExplicitPath = kubeconfigPath
 	}
+
+	overrides := &clientcmd.ConfigOverrides{}
+	if contextName != "" {
+		overrides.CurrentContext = contextName
+	}
+
 	configLoader := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		loadingRules,
-		&clientcmd.ConfigOverrides{},
+		overrides,
 	)
 
 	config, err = configLoader.ClientConfig()
@@ -68,7 +81,11 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 
 	rawConfig, err := configLoader.RawConfig()
 	if err == nil {
-		currentContext = rawConfig.CurrentContext
+		if contextName != "" {
+			currentContext = contextName
+		} else {
+			currentContext = rawConfig.CurrentContext
+		}
 	}
 
 	dynClient, err := dynamic.NewForConfig(config)
