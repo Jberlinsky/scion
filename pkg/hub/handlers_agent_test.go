@@ -3091,6 +3091,119 @@ func TestHandleAgentMessage_PlainTextBuildsStructuredMessage(t *testing.T) {
 	assert.NotEmpty(t, sm.Timestamp)
 }
 
+// TestHandleAgentMessage_NotifyCreatesSubscription verifies that sending a message
+// with notify=true creates a notification subscription for the sender.
+func TestHandleAgentMessage_NotifyCreatesSubscription(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID:   "grove-msg-notify",
+		Name: "Msg Notify Grove",
+		Slug: "msg-notify-grove",
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	broker := &store.RuntimeBroker{
+		ID:     "broker-msg-notify",
+		Name:   "Msg Notify Broker",
+		Slug:   "msg-notify-broker",
+		Status: store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
+	require.NoError(t, s.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID:    grove.ID,
+		BrokerID:   broker.ID,
+		BrokerName: broker.Name,
+		Status:     store.BrokerStatusOnline,
+	}))
+
+	agent := &store.Agent{
+		ID:              "agent-msg-notify-1",
+		Slug:            "agent-msg-notify-1",
+		Name:            "Msg Notify Agent",
+		GroveID:         grove.ID,
+		RuntimeBrokerID: broker.ID,
+		Phase:           string(state.PhaseRunning),
+	}
+	require.NoError(t, s.CreateAgent(ctx, agent))
+
+	disp := &recordingDispatcher{}
+	srv.SetDispatcher(disp)
+
+	// Send a message with notify=true
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents/"+agent.ID+"/message", map[string]interface{}{
+		"message":   "check on this",
+		"interrupt": false,
+		"notify":    true,
+	})
+	require.Equal(t, http.StatusOK, rec.Code, "response body: %s", rec.Body.String())
+
+	// Verify the message was dispatched
+	calls := disp.getCalls()
+	require.Len(t, calls, 1)
+
+	// Verify a notification subscription was created
+	subs, err := s.GetNotificationSubscriptions(ctx, agent.ID)
+	require.NoError(t, err)
+	require.Len(t, subs, 1, "expected one notification subscription for the agent")
+	assert.Equal(t, store.SubscriberTypeUser, subs[0].SubscriberType)
+	assert.Equal(t, agent.GroveID, subs[0].GroveID)
+}
+
+// TestHandleAgentMessage_NoNotifyNoSubscription verifies that sending a message
+// without notify=true does NOT create a notification subscription.
+func TestHandleAgentMessage_NoNotifyNoSubscription(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID:   "grove-msg-no-notify",
+		Name: "Msg No Notify Grove",
+		Slug: "msg-no-notify-grove",
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	broker := &store.RuntimeBroker{
+		ID:     "broker-msg-no-notify",
+		Name:   "Msg No Notify Broker",
+		Slug:   "msg-no-notify-broker",
+		Status: store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
+	require.NoError(t, s.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID:    grove.ID,
+		BrokerID:   broker.ID,
+		BrokerName: broker.Name,
+		Status:     store.BrokerStatusOnline,
+	}))
+
+	agent := &store.Agent{
+		ID:              "agent-msg-no-notify-1",
+		Slug:            "agent-msg-no-notify-1",
+		Name:            "Msg No Notify Agent",
+		GroveID:         grove.ID,
+		RuntimeBrokerID: broker.ID,
+		Phase:           string(state.PhaseRunning),
+	}
+	require.NoError(t, s.CreateAgent(ctx, agent))
+
+	disp := &recordingDispatcher{}
+	srv.SetDispatcher(disp)
+
+	// Send a message without notify
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents/"+agent.ID+"/message", map[string]interface{}{
+		"message":   "just a message",
+		"interrupt": false,
+	})
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Verify no subscription was created
+	subs, err := s.GetNotificationSubscriptions(ctx, agent.ID)
+	require.NoError(t, err)
+	assert.Len(t, subs, 0, "no subscription should be created without notify flag")
+}
+
 // TestCreateAgent_DispatchFailure_CleansUpBroker verifies that when the dispatch
 // to the runtime broker fails (e.g. auth resolution error), the hub dispatches a
 // delete with deleteFiles=true to clean up provisioned files on the broker, and

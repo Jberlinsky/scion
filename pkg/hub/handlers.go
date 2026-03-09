@@ -1515,6 +1515,10 @@ type MessageRequest struct {
 
 	// Interrupt the harness before sending.
 	Interrupt bool `json:"interrupt,omitempty"`
+
+	// Notify subscribes the sender to status notifications for this agent
+	// (COMPLETED, WAITING_FOR_INPUT, LIMITS_EXCEEDED, STALLED, ERROR).
+	Notify bool `json:"notify,omitempty"`
 }
 
 func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, id string) {
@@ -1581,6 +1585,23 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, id s
 		// No dispatcher available
 		RuntimeError(w, "No runtime broker dispatcher available for this agent")
 		return
+	}
+
+	// Create notification subscription if requested
+	if req.Notify {
+		var notifySubscriberType, notifySubscriberID, createdBy string
+		if agentIdent := GetAgentIdentityFromContext(ctx); agentIdent != nil {
+			createdBy = agentIdent.ID()
+			if creatorAgent, err := s.store.GetAgent(ctx, agentIdent.ID()); err == nil {
+				notifySubscriberType = store.SubscriberTypeAgent
+				notifySubscriberID = creatorAgent.Slug
+			}
+		} else if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+			createdBy = userIdent.ID()
+			notifySubscriberType = store.SubscriberTypeUser
+			notifySubscriberID = userIdent.ID()
+		}
+		s.createNotifySubscription(ctx, agent.ID, agent.GroveID, notifySubscriberType, notifySubscriberID, createdBy)
 	}
 
 	w.WriteHeader(http.StatusOK)

@@ -37,6 +37,7 @@ var msgIn string
 var msgAt string
 var msgPlain bool
 var msgAttach []string
+var msgNotify bool
 
 // messageCmd represents the message command
 var messageCmd = &cobra.Command{
@@ -69,6 +70,11 @@ If --broadcast is used, the agent name can be omitted and the message will be se
 			return fmt.Errorf("--in/--at cannot be combined with --broadcast or --all")
 		}
 
+		// Validate --notify restrictions
+		if msgNotify && (msgBroadcast || msgAll) {
+			return fmt.Errorf("--notify cannot be combined with --broadcast or --all")
+		}
+
 		// Validate attachments
 		if len(msgAttach) > messages.MaxAttachments {
 			return fmt.Errorf("too many attachments: %d (max %d)", len(msgAttach), messages.MaxAttachments)
@@ -99,8 +105,13 @@ If --broadcast is used, the agent name can be omitted and the message will be se
 			return scheduleMessageViaHub(hubCtx, agentName, message, msgInterrupt)
 		}
 
+		// --notify requires Hub mode
+		if msgNotify && hubCtx == nil {
+			return fmt.Errorf("--notify requires Hub mode (use 'scion hub enable' first)")
+		}
+
 		if hubCtx != nil {
-			return sendMessageViaHub(hubCtx, agentName, message, msgInterrupt, msgBroadcast, msgAll)
+			return sendMessageViaHub(hubCtx, agentName, message, msgInterrupt, msgBroadcast, msgAll, msgNotify)
 		}
 
 		// Local mode — structured messages are only available in Hub mode,
@@ -222,7 +233,7 @@ func buildStructuredMessage(sender, recipient, message string) *messages.Structu
 	return msg
 }
 
-func sendMessageViaHub(hubCtx *HubContext, agentName string, message string, interrupt bool, broadcast bool, all bool) error {
+func sendMessageViaHub(hubCtx *HubContext, agentName string, message string, interrupt bool, broadcast bool, all bool, notify bool) error {
 	if !isJSONOutput() {
 		PrintUsingHub(hubCtx.Endpoint)
 	}
@@ -289,7 +300,7 @@ func sendMessageViaHub(hubCtx *HubContext, agentName string, message string, int
 				defer cancel()
 
 				msg := buildStructuredMessage(sender, "agent:"+name, message)
-				if err := agentSvc.SendStructuredMessage(ctx, name, msg, interrupt); err != nil {
+				if err := agentSvc.SendStructuredMessage(ctx, name, msg, interrupt, false); err != nil {
 					fmt.Printf("Warning: failed to send message to agent '%s' via Hub: %s\n", name, err)
 					return
 				}
@@ -317,12 +328,15 @@ func sendMessageViaHub(hubCtx *HubContext, agentName string, message string, int
 	defer cancel()
 
 	msg := buildStructuredMessage(sender, "agent:"+agentName, message)
-	if err := agentSvc.SendStructuredMessage(ctx, agentName, msg, interrupt); err != nil {
+	if err := agentSvc.SendStructuredMessage(ctx, agentName, msg, interrupt, notify); err != nil {
 		return wrapHubError(fmt.Errorf("failed to send message to agent '%s' via Hub: %w", agentName, err))
 	}
 
 	if !isJSONOutput() {
 		fmt.Printf("Message sent to agent '%s' via Hub.\n", agentName)
+		if notify {
+			fmt.Printf("Subscribed to notifications for agent '%s'.\n", agentName)
+		}
 	}
 	return nil
 }
@@ -373,5 +387,6 @@ func init() {
 	messageCmd.Flags().StringVar(&msgAt, "at", "", "Schedule message delivery at an absolute time (ISO 8601, e.g. 2026-02-28T14:00:00Z)")
 	messageCmd.Flags().BoolVar(&msgPlain, "plain", false, "Mark for plain-text delivery (message still flows as structured JSON internally)")
 	messageCmd.Flags().StringArrayVar(&msgAttach, "attach", nil, "Attach file path(s), repeatable")
+	messageCmd.Flags().BoolVar(&msgNotify, "notify", false, "Subscribe to notifications for the target agent (completed, waiting for input, etc.)")
 	rootCmd.AddCommand(messageCmd)
 }

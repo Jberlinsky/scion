@@ -63,7 +63,8 @@ type AgentService interface {
 	SendMessage(ctx context.Context, agentID string, message string, interrupt bool) error
 
 	// SendStructuredMessage sends a structured message to an agent.
-	SendStructuredMessage(ctx context.Context, agentID string, msg *messages.StructuredMessage, interrupt bool) error
+	// If notify is true, the sender subscribes to status notifications for the target agent.
+	SendStructuredMessage(ctx context.Context, agentID string, msg *messages.StructuredMessage, interrupt bool, notify bool) error
 
 	// BroadcastMessage broadcasts a structured message to all running agents in the grove.
 	// Uses the Hub's broadcast endpoint which routes through the message broker (if available)
@@ -423,13 +424,16 @@ func (s *agentService) SendMessage(ctx context.Context, agentID string, message 
 }
 
 // SendStructuredMessage sends a structured message to an agent.
-func (s *agentService) SendStructuredMessage(ctx context.Context, agentID string, msg *messages.StructuredMessage, interrupt bool) error {
+// If notify is true, the sender subscribes to status notifications for the target agent.
+func (s *agentService) SendStructuredMessage(ctx context.Context, agentID string, msg *messages.StructuredMessage, interrupt bool, notify bool) error {
 	body := struct {
 		StructuredMessage *messages.StructuredMessage `json:"structured_message"`
 		Interrupt         bool                        `json:"interrupt,omitempty"`
+		Notify            bool                        `json:"notify,omitempty"`
 	}{
 		StructuredMessage: msg,
 		Interrupt:         interrupt,
+		Notify:            notify,
 	}
 	resp, err := s.c.transport.Post(ctx, s.agentPath(agentID)+"/message", body, nil)
 	if err != nil {
