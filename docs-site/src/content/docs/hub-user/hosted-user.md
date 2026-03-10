@@ -22,7 +22,11 @@ hub:
   local_only: false
 ```
 
+**Note:** In workstation mode, this should be http://localhost:8080.
+
 ### Authentication
+
+**Note:** Authentication is not required in workstation mode, it uses a machine specific dev-token, and is only listening on localhost.
 
 Once the endpoint is configured, authenticate your CLI:
 

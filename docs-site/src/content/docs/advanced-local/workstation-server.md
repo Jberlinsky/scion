@@ -17,10 +17,10 @@ This enables you to:
 
 ## Starting the Server
 
-To start the workstation server, use the `server start` command with the `--workstation` flag. By default, the server runs as a persistent background **daemon**, freeing up your terminal:
+To start the workstation server, use the `server start` command. By default, the server runs as a persistent background **daemon**, freeing up your terminal:
 
 ```bash
-scion server start --workstation
+scion server start
 ```
 
 This command performs several actions simultaneously:
@@ -36,7 +36,7 @@ Because it runs as a background daemon, you can manage its lifecycle using:
 If you prefer to run the server interactively, use the `--foreground` flag:
 
 ```bash
-scion server start --workstation --foreground
+scion server start --foreground
 ```
 
 You can now navigate to `http://localhost:8080` in your browser to access the Web Dashboard.
@@ -45,20 +45,18 @@ You can now navigate to `http://localhost:8080` in your browser to access the We
 
 Because the Workstation Server mode involves both a central Hub (running on your host network) and agents (running in isolated containers), network configuration can occasionally require attention, especially depending on your chosen runtime.
 
-### Automatic Bridge (Podman)
+### Automatic Bridge (Podman, Docker)
 
 If you are using **Podman** as your container runtime, Scion automatically creates and configures the necessary network bridge. The agents can communicate with the Hub (for API access, status updates, and SSE events) seamlessly via this internal network. No manual intervention is required.
 
-### Manual Configuration (Docker)
+### Manual Configuration
 
-If you are using **Docker** or other runtimes, you may need to ensure that the containers can route traffic back to the host machine's IP address on the port where the Hub is listening (e.g., `8080`).
-
-In some environments (like Docker Desktop on macOS or Windows), you can use the special DNS name `host.docker.internal` to resolve the host. In native Linux Docker setups, the host might be reachable via the default bridge gateway IP (often `172.17.0.1`).
+If you are using other runtimes, you may need to ensure that the containers can route traffic back to the host machine's IP address on the port where the Hub is listening (e.g., `8080`).
 
 To configure the agents to find the Hub, you might need to adjust the `SCION_HUB_API_URL` setting passed to the agents in your template or via the CLI:
 
 ```bash
-scion start gemini-agent --env SCION_HUB_API_URL=http://host.docker.internal:8080
+scion start my-agent --env SCION_HUB_API_URL=http://host.bridge.internal:8080
 ```
 
 ## Next Steps

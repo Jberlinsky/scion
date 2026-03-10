@@ -16,30 +16,32 @@ The **Scion Hub** is the central brain of a hosted Scion architecture. It mainta
 
 ## Running the Hub
 
-The Hub is part of the main `scion` binary. You can start it using the `server start` command. By default, the server runs as a background **daemon**, freeing up your terminal:
+The Hub is part of the main `scion` binary. You can start it using the `server start` command. A full and complete production startup command will look something like this:
 
 ```bash
-# Start the Hub, Web Dashboard, and a local Runtime Broker (background daemon)
-scion server start --workstation
+# Start the Hub, Web Dashboard, and a local Runtime Broker
 
-# Start ONLY the Hub (requires explicit component flags)
-scion server start --enable-hub
+scion --global server start --foreground --production --debug --enable-hub --enable-runtime-broker --enable-web --runtime-broker-port 9800 --web-port 8080 --storage-bucket \${SCION_HUB_STORAGE_BUCKET} --session-secret \${SESSION_SECRET} --auto-provide
+
 ```
+This is often best managed through something like systemd
 
 ### Hub vs. Broker Processes
 While they can run in the same process—known as **Combo Mode** (the default for `scion server start --workstation`)—they serve distinct roles:
 - **The Hub** is the stateless control plane. It provides the API and Web Dashboard, and should be accessible via a public or internal URL.
 - **The Broker** is the execution host. It registers with a Hub and executes agents. Brokers can run behind NAT or firewalls, as they establish outbound connections to the Hub. You can connect multiple external brokers to a single Hub.
 
+If you prefer to run the server in the background:
+```bash
+scion server start
+```
+
 To manage the background daemon, use:
 - `scion server status`
 - `scion server restart`
 - `scion server stop`
 
-If you prefer to run the server interactively in the foreground:
-```bash
-scion server start --workstation --foreground
-```
+
 
 ## Configuration
 
@@ -68,13 +70,13 @@ See the [Server Configuration Reference](/reference/server-config) for all avail
 
 ## Authentication
 
-The Hub supports multiple authentication modes to balance ease of development with production security.
+The Hub supports multiple end-user authentication modes to balance ease of development with production security.
 
 ### OAuth 2.0 (Production)
 Scion supports Google and GitHub as identity providers. Configuration requires creating OAuth Apps in the respective provider consoles.
 See the [Authentication Guide](/hub-admin/auth) for detailed setup instructions.
 
-### Dev Auth (Local Development)
+### Dev Auth (Local Development, workstation mode)
 For local testing, the Hub can auto-generate a development token:
 ```yaml
 server:
@@ -84,6 +86,7 @@ server:
 The token is written to `~/.scion/dev-token` on startup. The CLI and Web Dashboard automatically detect this token when running on the same machine.
 
 ### API Keys (Programmatic)
+**NOT IMPLEMENTED**
 The Hub supports long-lived API keys for CI/CD or other programmatic integrations.
 
 ## Persistence
@@ -100,6 +103,8 @@ server:
 ```
 
 ### PostgreSQL (Production)
+**NOT IMPLEMENTED**
+
 Recommended for high-availability or multi-node deployments.
 ```yaml
 server:
@@ -117,25 +122,11 @@ The Hub stores agent templates and other artifacts.
 
 ## Deployment
 
-### Docker / Podman
-The Hub is available as a Docker image.
+### GCE VM
 
-```bash
-# Standalone Hub (no web frontend)
-docker run -p 9810:9810 \
-  -e SCION_SERVER_HUB_PORT=9810 \
-  -v ~/.scion:/root/.scion \
-  ghcr.io/ptone/scion-hub:latest
+The most direct path to getting a deployed demonstration hub, is to use the GCE setup scripts in `/scripts/starter-hub`
 
-# Combined mode (Hub + Web on port 8080)
-docker run -p 8080:8080 \
-  -v ~/.scion:/root/.scion \
-  ghcr.io/ptone/scion-hub:latest --enable-hub --enable-web
-```
-
-(Or use `podman run` with the same arguments).
-
-### Cloud Run (GCP)
+### Cloud Run, GKE (GCP) *Future*
 The Hub is designed to be stateless and is highly compatible with Google Cloud Run. 
 - Use **Cloud SQL** (PostgreSQL) for the database.
 - Use **Cloud Storage** for template persistence.

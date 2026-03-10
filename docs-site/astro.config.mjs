@@ -42,9 +42,8 @@ export default defineConfig({
 				{
 					label: 'Getting Started',
 					items: [
-						{ label: 'Quickstart', slug: 'getting-started/install' },
-						{ label: 'Workspace Basics', slug: 'getting-started/workspace' },
-						{ label: 'Tmux Sessions', slug: 'getting-started/tmux' },
+						{ label: 'Installation', slug: 'getting-started/install' },
+						{ label: 'Tutorial', slug: 'getting-started/tutorial' },
 					],
 				},
 				{
@@ -54,6 +53,9 @@ export default defineConfig({
 						{ label: 'Templates & Roles', slug: 'advanced-local/templates' },
 						{ label: 'Custom Images', slug: 'advanced-local/custom-images' },
 						{ label: 'Agent Credentials', slug: 'advanced-local/agent-credentials' },
+						{ label: 'About Workspaces', slug: 'advanced-local/workspace' },
+						{ label: 'Tmux Sessions', slug: 'advanced-local/tmux' },
+						{ label: 'Shell Completions', slug: 'advanced-local/completions' },
 						{ label: 'Workstation Server', slug: 'advanced-local/workstation-server' },
 					],
 				},
@@ -63,13 +65,13 @@ export default defineConfig({
 						{ label: 'Connecting to Hub', slug: 'hub-user/hosted-user' },
 						{ label: 'Web Dashboard', slug: 'hub-user/dashboard' },
 						{ label: 'Secret Management', slug: 'hub-user/secrets' },
+						{ label: 'Runtime Broker', slug: 'hub-user/runtime-broker' },
 					],
 				},
 				{
 					label: 'Hub Administration',
 					items: [
 						{ label: 'Hub Setup', slug: 'hub-admin/hub-server' },
-						{ label: 'Runtime Broker', slug: 'hub-admin/runtime-broker' },
 						{ label: 'Kubernetes', slug: 'hub-admin/kubernetes' },
 						{ label: 'Security', slug: 'hub-admin/auth' },
 						{ label: 'Permissions', slug: 'hub-admin/permissions' },

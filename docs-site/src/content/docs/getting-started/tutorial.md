@@ -12,7 +12,7 @@ To start an agent, navigate to your project directory (where you ran `scion init
 scion start my-first-agent "Write a python script that prints Hello World"
 ```
 
-The agent will be launched in the background. It will automatically create a new git worktree and branch for its workspace, ensuring your main working directory remains clean.
+The agent will be launched in the background. If you are in a git repo, it will automatically create a new git worktree and branch for its workspace, ensuring your main working directory remains clean.
 
 ## 2. List Agents
 
@@ -38,7 +38,17 @@ If the agent needs your input or confirmation (its status will be `WAITING_FOR_I
 scion attach my-first-agent
 ```
 
-When you are done interacting, you can detach from the session to leave the agent running in the background.
+When you are done interacting, you can detach from the session to leave the agent running in the background. This is done with tmux control keys, Cntrl-b, then d.
+
+See more
+<!-- TODO link to tmux doc -->
+
+
+You can start and attach to an agent in one go with 
+
+```bash
+scion start --attach my-other-agent
+```
 
 ## 4. Clean Up
 
@@ -49,3 +59,5 @@ scion delete my-first-agent
 ```
 
 This will stop the agent container and clean up its resources. By default, its git branch is removed, so be sure to merge any changes you want to keep before deleting the agent!
+
+This gives you the very basics of the command, you can use `scion --help` and `scion <cmd> --help` to learn more about each of the commands in the tool.
