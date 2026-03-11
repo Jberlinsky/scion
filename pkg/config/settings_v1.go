@@ -1542,6 +1542,75 @@ func UpdateVersionedSetting(dir string, key string, value string) error {
 	return SaveVersionedSettings(dir, vs)
 }
 
+// GetVersionedSettingValue retrieves a specific setting value from a VersionedSettings struct.
+// It mirrors the keys supported by UpdateVersionedSetting for read access.
+func GetVersionedSettingValue(vs *VersionedSettings, key string) (string, error) {
+	switch key {
+	case "active_profile":
+		return vs.ActiveProfile, nil
+	case "default_template":
+		return vs.DefaultTemplate, nil
+	case "image_registry":
+		return vs.ImageRegistry, nil
+	case "cli.autohelp":
+		if vs.CLI != nil && vs.CLI.AutoHelp != nil {
+			if *vs.CLI.AutoHelp {
+				return "true", nil
+			}
+			return "false", nil
+		}
+		return "", nil
+	case "grove_id":
+		if vs.Hub != nil {
+			return vs.Hub.GroveID, nil
+		}
+		return "", nil
+	case "hub.enabled":
+		if vs.Hub != nil && vs.Hub.Enabled != nil {
+			if *vs.Hub.Enabled {
+				return "true", nil
+			}
+			return "false", nil
+		}
+		return "", nil
+	case "hub.endpoint":
+		if vs.Hub != nil {
+			return vs.Hub.Endpoint, nil
+		}
+		return "", nil
+	case "hub.groveId":
+		if vs.Hub != nil {
+			return vs.Hub.GroveID, nil
+		}
+		return "", nil
+	case "hub.local_only":
+		if vs.Hub != nil && vs.Hub.LocalOnly != nil {
+			if *vs.Hub.LocalOnly {
+				return "true", nil
+			}
+			return "false", nil
+		}
+		return "", nil
+	case "hub.brokerId":
+		if vs.Server != nil && vs.Server.Broker != nil {
+			return vs.Server.Broker.BrokerID, nil
+		}
+		return "", nil
+	case "hub.brokerToken":
+		if vs.Server != nil && vs.Server.Broker != nil {
+			return vs.Server.Broker.BrokerToken, nil
+		}
+		return "", nil
+	case "hub.brokerNickname":
+		if vs.Server != nil && vs.Server.Broker != nil {
+			return vs.Server.Broker.BrokerNickname, nil
+		}
+		return "", nil
+	}
+
+	return "", fmt.Errorf("unknown or complex setting key: %s", key)
+}
+
 // SaveVersionedSettings writes a VersionedSettings struct as YAML to settings.yaml in dir.
 func SaveVersionedSettings(dir string, vs *VersionedSettings) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {

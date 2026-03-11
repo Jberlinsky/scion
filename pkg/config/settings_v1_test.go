@@ -3371,6 +3371,72 @@ func TestUpdateVersionedSetting_ImageRegistry(t *testing.T) {
 	assert.Equal(t, "ghcr.io/myorg", loaded.ImageRegistry)
 }
 
+func TestGetVersionedSettingValue(t *testing.T) {
+	autohelp := true
+	enabled := false
+	localOnly := true
+
+	vs := &VersionedSettings{
+		SchemaVersion:   "1",
+		ActiveProfile:   "staging",
+		DefaultTemplate: "my-template",
+		ImageRegistry:   "ghcr.io/myorg",
+		CLI:             &V1CLIConfig{AutoHelp: &autohelp},
+		Hub: &V1HubClientConfig{
+			Enabled:  &enabled,
+			Endpoint: "https://hub.example.com",
+			GroveID:  "grove-123",
+			LocalOnly: &localOnly,
+		},
+		Server: &V1ServerConfig{
+			Broker: &V1BrokerConfig{
+				BrokerID:       "broker-1",
+				BrokerToken:    "tok-secret",
+				BrokerNickname: "my-broker",
+			},
+		},
+	}
+
+	tests := []struct {
+		key  string
+		want string
+	}{
+		{"active_profile", "staging"},
+		{"default_template", "my-template"},
+		{"image_registry", "ghcr.io/myorg"},
+		{"cli.autohelp", "true"},
+		{"grove_id", "grove-123"},
+		{"hub.enabled", "false"},
+		{"hub.endpoint", "https://hub.example.com"},
+		{"hub.groveId", "grove-123"},
+		{"hub.local_only", "true"},
+		{"hub.brokerId", "broker-1"},
+		{"hub.brokerToken", "tok-secret"},
+		{"hub.brokerNickname", "my-broker"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			got, err := GetVersionedSettingValue(vs, tt.key)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+
+	// Unknown key should error
+	_, err := GetVersionedSettingValue(vs, "nonexistent_key")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown or complex setting key")
+
+	// Nil sub-structs should return empty strings
+	empty := &VersionedSettings{SchemaVersion: "1"}
+	for _, key := range []string{"grove_id", "hub.endpoint", "hub.brokerId", "cli.autohelp"} {
+		got, err := GetVersionedSettingValue(empty, key)
+		require.NoError(t, err, "key=%s", key)
+		assert.Empty(t, got, "key=%s", key)
+	}
+}
+
 func TestIsImageRegistryConfigured(t *testing.T) {
 	tests := []struct {
 		name     string

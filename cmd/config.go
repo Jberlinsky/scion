@@ -136,12 +136,13 @@ var configGetCmd = &cobra.Command{
 		projectDir, _ := config.GetResolvedProjectDir(grovePath)
 		// Even if error, we can try loading defaults/global
 
-		settings, err := config.LoadSettings(projectDir)
+		// Try versioned settings first (supports all v1 keys like image_registry)
+		vs, err := config.LoadVersionedSettings(projectDir)
 		if err != nil {
 			return err
 		}
 
-		val, err := config.GetSettingValue(settings, key)
+		val, err := config.GetVersionedSettingValue(vs, key)
 		if err != nil {
 			return err
 		}
