@@ -392,6 +392,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	hubEndpoint := resolveHubEndpointForCreate(
 		req.HubEndpoint,
+		s.resolveHubEndpointFromRequest(r),
 		s.config.HubEndpoint,
 		req.ResolvedEnv,
 		req.GrovePath,

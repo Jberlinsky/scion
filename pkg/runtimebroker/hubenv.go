@@ -31,8 +31,11 @@ var safeEnvLogKeys = map[string]struct{}{
 	"SCION_TELEMETRY_ENABLED": {},
 }
 
-func resolveHubEndpointForCreate(reqHubEndpoint, brokerHubEndpoint string, resolvedEnv map[string]string, grovePath, containerHubEndpoint, runtimeName string) string {
+func resolveHubEndpointForCreate(reqHubEndpoint, connectionHubEndpoint, brokerHubEndpoint string, resolvedEnv map[string]string, grovePath, containerHubEndpoint, runtimeName string) string {
 	hubEndpoint := reqHubEndpoint
+	if hubEndpoint == "" {
+		hubEndpoint = connectionHubEndpoint
+	}
 	if hubEndpoint == "" {
 		hubEndpoint = brokerHubEndpoint
 	}

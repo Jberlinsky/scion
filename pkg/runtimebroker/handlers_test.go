@@ -1463,6 +1463,90 @@ hub:
 	})
 }
 
+// TestCreateAgentConnectionHubEndpoint tests that when a request arrives via
+// control channel from a specific hub, the connection's hub endpoint is used
+// instead of the broker's own config.HubEndpoint (which may point to a
+// different hub in multi-hub setups).
+func TestCreateAgentConnectionHubEndpoint(t *testing.T) {
+	t.Run("connection endpoint used when request endpoint empty", func(t *testing.T) {
+		cfg := DefaultServerConfig()
+		cfg.BrokerID = "test-broker-id"
+		cfg.BrokerName = "test-host"
+		cfg.HubEndpoint = "http://localhost:8080" // broker's own local hub
+		cfg.ContainerHubEndpoint = "http://host.containers.internal:8080"
+
+		mgr := &envCapturingManager{}
+		rt := &runtime.MockRuntime{}
+		srv := New(cfg, mgr, rt)
+
+		// Register a remote hub connection (as would happen via control channel)
+		srv.hubMu.Lock()
+		srv.hubConnections["hub-demo-scion-ai-dev"] = &HubConnection{
+			Name:        "hub-demo-scion-ai-dev",
+			HubEndpoint: "https://hub.demo.scion-ai.dev",
+		}
+		srv.hubMu.Unlock()
+
+		// Request comes via control channel with no explicit hubEndpoint
+		body := `{
+			"name": "remote-hub-agent"
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Scion-Hub-Connection", "hub-demo-scion-ai-dev")
+		w := httptest.NewRecorder()
+
+		srv.Handler().ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+		}
+
+		// Should use the remote hub's endpoint, NOT the broker's local hub
+		if got := mgr.lastEnv["SCION_HUB_ENDPOINT"]; got != "https://hub.demo.scion-ai.dev" {
+			t.Errorf("expected SCION_HUB_ENDPOINT='https://hub.demo.scion-ai.dev' from connection, got %q", got)
+		}
+	})
+
+	t.Run("request endpoint takes priority over connection endpoint", func(t *testing.T) {
+		cfg := DefaultServerConfig()
+		cfg.BrokerID = "test-broker-id"
+		cfg.BrokerName = "test-host"
+
+		mgr := &envCapturingManager{}
+		rt := &runtime.MockRuntime{}
+		srv := New(cfg, mgr, rt)
+
+		srv.hubMu.Lock()
+		srv.hubConnections["hub-demo"] = &HubConnection{
+			Name:        "hub-demo",
+			HubEndpoint: "https://hub.demo.scion-ai.dev",
+		}
+		srv.hubMu.Unlock()
+
+		// Request explicitly sets hubEndpoint (hub dispatcher configured it)
+		body := `{
+			"name": "explicit-endpoint-agent",
+			"hubEndpoint": "https://hub.explicit.example.com"
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Scion-Hub-Connection", "hub-demo")
+		w := httptest.NewRecorder()
+
+		srv.Handler().ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+		}
+
+		// Explicit request endpoint wins over connection
+		if got := mgr.lastEnv["SCION_HUB_ENDPOINT"]; got != "https://hub.explicit.example.com" {
+			t.Errorf("expected SCION_HUB_ENDPOINT='https://hub.explicit.example.com' from request, got %q", got)
+		}
+	})
+}
+
 // gitCloneCapturingManager captures env and GitClone from Start options.
 type gitCloneCapturingManager struct {
 	mockManager

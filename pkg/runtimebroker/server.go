@@ -1050,6 +1050,24 @@ func (s *Server) resolveHydrator(r *http.Request) *templatecache.Hydrator {
 	return nil
 }
 
+// resolveHubEndpointFromRequest returns the hub endpoint for the hub connection
+// identified by the X-Scion-Hub-Connection header. This allows the broker to
+// use the correct hub endpoint when dispatched by a remote hub, rather than
+// falling back to its own config.HubEndpoint (which may point to a different hub).
+func (s *Server) resolveHubEndpointFromRequest(r *http.Request) string {
+	connName := r.Header.Get("X-Scion-Hub-Connection")
+	if connName == "" {
+		return ""
+	}
+	s.hubMu.RLock()
+	conn, ok := s.hubConnections[connName]
+	s.hubMu.RUnlock()
+	if ok {
+		return conn.HubEndpoint
+	}
+	return ""
+}
+
 // getFirstHeartbeat returns the heartbeat service from the first available connection.
 // Used for backward compat with single-hub references (e.g., force heartbeat after stop).
 func (s *Server) getFirstHeartbeat() *HeartbeatService {
