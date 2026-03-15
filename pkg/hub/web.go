@@ -765,6 +765,14 @@ func (ws *WebServer) prefetchPageData(r *http.Request) template.JS {
 // spaHandler returns the SPA shell HTML for any route not matched by other handlers.
 func (ws *WebServer) spaHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Check if the request matches a real static file (e.g. root-level
+		// public assets like notification icons) before falling through to
+		// the SPA shell. Without this, files in web/public/ that don't live
+		// under /assets/ or /shoelace/ would get the HTML shell instead.
+		if r.URL.Path != "/" && ws.tryServeStaticFile(w, r) {
+			return
+		}
+
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.WriteHeader(http.StatusOK)
@@ -783,6 +791,36 @@ func (ws *WebServer) spaHandler() http.HandlerFunc {
 			slog.Error("Failed to render SPA shell", "error", err)
 		}
 	}
+}
+
+// tryServeStaticFile attempts to serve the request as a static file from the
+// asset filesystem. Returns true if the file was found and served, false if
+// the path does not correspond to a real file.
+func (ws *WebServer) tryServeStaticFile(w http.ResponseWriter, r *http.Request) bool {
+	// Clean the path and strip the leading slash for fs.Open.
+	name := strings.TrimPrefix(filepath.ToSlash(r.URL.Path), "/")
+	if name == "" {
+		return false
+	}
+
+	if ws.assetsDisk != "" {
+		p := filepath.Join(ws.assetsDisk, filepath.FromSlash(name))
+		info, err := os.Stat(p)
+		if err != nil || info.IsDir() {
+			return false
+		}
+	} else if ws.assets != nil {
+		f, err := ws.assets.Open(name)
+		if err != nil {
+			return false
+		}
+		f.Close()
+	} else {
+		return false
+	}
+
+	ws.serveStaticAsset(w, r)
+	return true
 }
 
 // handleSSE serves the Server-Sent Events endpoint. It subscribes to the
@@ -917,11 +955,23 @@ func isPublicRoute(path string) bool {
 		return true
 	case path == "/login":
 		return true
-	case path == "/favicon.ico":
+	case isRootLevelStaticFile(path): // e.g. /favicon.ico, /scion-notification-icon.png
 		return true
 	default:
 		return false
 	}
+}
+
+// isRootLevelStaticFile returns true for root-level paths that look like
+// static file requests (e.g. /favicon.ico, /scion-notification-icon.png,
+// /robots.txt). These are files placed in web/public/ and served at the
+// root by Vite. They have a file extension and no sub-path segments.
+func isRootLevelStaticFile(path string) bool {
+	// Must start with / and have no further slashes (root-level only).
+	if len(path) < 2 || strings.Count(path, "/") != 1 {
+		return false
+	}
+	return filepath.Ext(path) != ""
 }
 
 // isBrowserRequest returns true if the request appears to come from a browser.

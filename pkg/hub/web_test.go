@@ -210,6 +210,62 @@ func TestStaticAssetHandler_NoAssets(t *testing.T) {
 	}
 }
 
+func TestRootLevelStaticFile_Disk(t *testing.T) {
+	// Root-level public files (e.g. /scion-notification-icon.png) should be
+	// served as static assets rather than falling through to the SPA shell.
+	tmpDir := t.TempDir()
+	iconContent := "fake-png-data"
+	if err := os.WriteFile(filepath.Join(tmpDir, "scion-notification-icon.png"), []byte(iconContent), 0644); err != nil {
+		t.Fatalf("failed to write test icon: %v", err)
+	}
+
+	ws := newTestWebServer(t, WebServerConfig{
+		AssetsDir: tmpDir,
+	})
+
+	req := httptest.NewRequest("GET", "/scion-notification-icon.png", nil)
+	rec := httptest.NewRecorder()
+
+	ws.Handler().ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200 for root-level static file, got %d", resp.StatusCode)
+	}
+	if string(body) != iconContent {
+		t.Errorf("expected icon content %q, got %q", iconContent, string(body))
+	}
+	// Should NOT be text/html (that would mean SPA handler served it)
+	ct := resp.Header.Get("Content-Type")
+	if strings.Contains(ct, "text/html") {
+		t.Errorf("root-level static file should not be served as HTML, got Content-Type %q", ct)
+	}
+}
+
+func TestRootLevelStaticFile_NonexistentFallsToSPA(t *testing.T) {
+	// A root-level path with a file extension that doesn't match a real file
+	// should fall through to the SPA shell (not serve a 404 from the static handler).
+	tmpDir := t.TempDir()
+
+	ws := newDevAuthWebServer(t, func(cfg *WebServerConfig) {
+		cfg.AssetsDir = tmpDir
+	})
+
+	req := httptest.NewRequest("GET", "/nonexistent.png", nil)
+	req.Header.Set("Authorization", "Bearer test-dev-token-12345")
+	rec := httptest.NewRecorder()
+
+	ws.Handler().ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("non-existent root file should fall through to SPA shell (text/html), got Content-Type %q", ct)
+	}
+}
+
 func TestSecurityHeaders(t *testing.T) {
 	ws := newTestWebServer(t, WebServerConfig{})
 
@@ -1000,6 +1056,8 @@ func TestIsPublicRoute(t *testing.T) {
 		{"/auth/debug", true},
 		{"/login", true},
 		{"/favicon.ico", true},
+		{"/scion-notification-icon.png", true},
+		{"/robots.txt", true},
 		{"/api/v1/groves", true},
 		{"/api/v1/agents", true},
 		{"/api/v1/auth/login", true},
