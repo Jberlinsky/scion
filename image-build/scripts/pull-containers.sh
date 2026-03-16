@@ -101,5 +101,9 @@ for image in "${IMAGES[@]}"; do
 done
 
 echo "Pruning unused images..."
-"$RUNTIME" image prune -f
+if [[ "$RUNTIME" == "container" ]]; then
+  "$RUNTIME" image prune
+else
+  "$RUNTIME" image prune -f
+fi
 echo "Done."
