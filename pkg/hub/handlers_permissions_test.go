@@ -17,9 +17,11 @@
 package hub
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -742,6 +744,331 @@ func TestGroupDeleteGroveAgentsRejected(t *testing.T) {
 	// always defaults to "explicit" on read. This test validates the
 	// handler logic which is exercised via the entadapter tests.
 	t.Skip("requires Ent-backed store (GroupType not persisted in legacy SQLite)")
+}
+
+// ============================================================================
+// Group Authorization Tests
+// ============================================================================
+
+// doGroupRequestAsUser creates a user token and performs an HTTP request as that user.
+// This is a local copy to avoid depending on testify in this file.
+func doGroupRequestAsUser(t *testing.T, srv *Server, user *store.User, method, path string, body interface{}) *httptest.ResponseRecorder {
+	t.Helper()
+
+	token, _, _, err := srv.userTokenService.GenerateTokenPair(
+		user.ID, user.Email, user.DisplayName, user.Role, ClientTypeWeb,
+	)
+	if err != nil {
+		t.Fatalf("failed to generate token: %v", err)
+	}
+
+	var bodyBytes []byte
+	if body != nil {
+		bodyBytes, err = json.Marshal(body)
+		if err != nil {
+			t.Fatalf("failed to marshal body: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(method, path, bytes.NewReader(bodyBytes))
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+func TestGroupUpdateAuthz_OwnerAllowed(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	owner := &store.User{
+		ID:          "user_owner_upd",
+		Email:       "owner@example.com",
+		DisplayName: "Owner",
+		Role:        "member",
+		Status:      "active",
+		Created:     time.Now(),
+	}
+	if err := s.CreateUser(ctx, owner); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	group := &store.Group{
+		ID:      "group_authz_upd",
+		Name:    "Owned Group",
+		Slug:    "owned-group-upd",
+		OwnerID: owner.ID,
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	if err := s.CreateGroup(ctx, group); err != nil {
+		t.Fatalf("failed to create group: %v", err)
+	}
+
+	body := UpdateGroupRequest{Name: "Renamed"}
+	rec := doGroupRequestAsUser(t, srv, owner, http.MethodPatch, "/api/v1/groups/"+group.ID, body)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for owner update, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGroupUpdateAuthz_NonOwnerDenied(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	other := &store.User{
+		ID:          "user_other_upd",
+		Email:       "other@example.com",
+		DisplayName: "Other",
+		Role:        "member",
+		Status:      "active",
+		Created:     time.Now(),
+	}
+	if err := s.CreateUser(ctx, other); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	group := &store.Group{
+		ID:      "group_authz_upd2",
+		Name:    "Someone Else Group",
+		Slug:    "someone-else-upd",
+		OwnerID: "user_someone_else",
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	if err := s.CreateGroup(ctx, group); err != nil {
+		t.Fatalf("failed to create group: %v", err)
+	}
+
+	body := UpdateGroupRequest{Name: "Hacked"}
+	rec := doGroupRequestAsUser(t, srv, other, http.MethodPatch, "/api/v1/groups/"+group.ID, body)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for non-owner update, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGroupDeleteAuthz_NonOwnerDenied(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	other := &store.User{
+		ID:          "user_other_del",
+		Email:       "other-del@example.com",
+		DisplayName: "Other",
+		Role:        "member",
+		Status:      "active",
+		Created:     time.Now(),
+	}
+	if err := s.CreateUser(ctx, other); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	group := &store.Group{
+		ID:      "group_authz_del",
+		Name:    "Protected Group",
+		Slug:    "protected-group",
+		OwnerID: "user_someone_else",
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	if err := s.CreateGroup(ctx, group); err != nil {
+		t.Fatalf("failed to create group: %v", err)
+	}
+
+	rec := doGroupRequestAsUser(t, srv, other, http.MethodDelete, "/api/v1/groups/"+group.ID, nil)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for non-owner delete, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGroupAddMemberAuthz_OwnerAllowed(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	owner := &store.User{
+		ID:          "user_owner_add",
+		Email:       "owner-add@example.com",
+		DisplayName: "Owner",
+		Role:        "member",
+		Status:      "active",
+		Created:     time.Now(),
+	}
+	memberUser := &store.User{
+		ID:          "user_to_add",
+		Email:       "toadd@example.com",
+		DisplayName: "To Add",
+		Role:        "member",
+		Status:      "active",
+		Created:     time.Now(),
+	}
+	for _, u := range []*store.User{owner, memberUser} {
+		if err := s.CreateUser(ctx, u); err != nil {
+			t.Fatalf("failed to create user: %v", err)
+		}
+	}
+
+	group := &store.Group{
+		ID:      "group_authz_add",
+		Name:    "Owned Group",
+		Slug:    "owned-group-add",
+		OwnerID: owner.ID,
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	if err := s.CreateGroup(ctx, group); err != nil {
+		t.Fatalf("failed to create group: %v", err)
+	}
+
+	body := AddGroupMemberRequest{
+		MemberType: "user",
+		MemberID:   memberUser.ID,
+		Role:       "member",
+	}
+	rec := doGroupRequestAsUser(t, srv, owner, http.MethodPost, "/api/v1/groups/"+group.ID+"/members", body)
+
+	if rec.Code != http.StatusCreated {
+		t.Errorf("expected 201 for owner add member, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGroupAddMemberAuthz_NonOwnerDenied(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	other := &store.User{
+		ID:          "user_other_add",
+		Email:       "other-add@example.com",
+		DisplayName: "Other",
+		Role:        "member",
+		Status:      "active",
+		Created:     time.Now(),
+	}
+	if err := s.CreateUser(ctx, other); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	group := &store.Group{
+		ID:      "group_authz_add2",
+		Name:    "Protected Group",
+		Slug:    "protected-group-add",
+		OwnerID: "user_someone_else",
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	if err := s.CreateGroup(ctx, group); err != nil {
+		t.Fatalf("failed to create group: %v", err)
+	}
+
+	body := AddGroupMemberRequest{
+		MemberType: "user",
+		MemberID:   other.ID,
+		Role:       "member",
+	}
+	rec := doGroupRequestAsUser(t, srv, other, http.MethodPost, "/api/v1/groups/"+group.ID+"/members", body)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for non-owner add member, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGroupRemoveMemberAuthz_NonOwnerDenied(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	other := &store.User{
+		ID:          "user_other_rm",
+		Email:       "other-rm@example.com",
+		DisplayName: "Other",
+		Role:        "member",
+		Status:      "active",
+		Created:     time.Now(),
+	}
+	if err := s.CreateUser(ctx, other); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	group := &store.Group{
+		ID:      "group_authz_rm",
+		Name:    "Protected Group",
+		Slug:    "protected-group-rm",
+		OwnerID: "user_someone_else",
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	if err := s.CreateGroup(ctx, group); err != nil {
+		t.Fatalf("failed to create group: %v", err)
+	}
+
+	// Add a member directly via store
+	member := &store.GroupMember{
+		GroupID:    group.ID,
+		MemberType: "user",
+		MemberID:   "user_existing",
+		Role:       "member",
+		AddedAt:    time.Now(),
+	}
+	if err := s.AddGroupMember(ctx, member); err != nil {
+		t.Fatalf("failed to add member: %v", err)
+	}
+
+	rec := doGroupRequestAsUser(t, srv, other, http.MethodDelete, "/api/v1/groups/"+group.ID+"/members/user/user_existing", nil)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for non-owner remove member, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGroupRemoveMemberAuthz_OwnerAllowed(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	owner := &store.User{
+		ID:          "user_owner_rm",
+		Email:       "owner-rm@example.com",
+		DisplayName: "Owner",
+		Role:        "member",
+		Status:      "active",
+		Created:     time.Now(),
+	}
+	if err := s.CreateUser(ctx, owner); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	group := &store.Group{
+		ID:      "group_authz_rm2",
+		Name:    "Owned Group",
+		Slug:    "owned-group-rm",
+		OwnerID: owner.ID,
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	if err := s.CreateGroup(ctx, group); err != nil {
+		t.Fatalf("failed to create group: %v", err)
+	}
+
+	member := &store.GroupMember{
+		GroupID:    group.ID,
+		MemberType: "user",
+		MemberID:   "user_to_remove",
+		Role:       "member",
+		AddedAt:    time.Now(),
+	}
+	if err := s.AddGroupMember(ctx, member); err != nil {
+		t.Fatalf("failed to add member: %v", err)
+	}
+
+	rec := doGroupRequestAsUser(t, srv, owner, http.MethodDelete, "/api/v1/groups/"+group.ID+"/members/user/user_to_remove", nil)
+
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("expected 204 for owner remove member, got %d: %s", rec.Code, rec.Body.String())
+	}
 }
 
 // ============================================================================

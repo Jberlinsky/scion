@@ -178,6 +178,15 @@ func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
 		slug = api.Slugify(req.Name)
 	}
 
+	ownerID := req.OwnerID
+	createdBy := ""
+	if identity := GetIdentityFromContext(ctx); identity != nil {
+		createdBy = identity.ID()
+		if ownerID == "" {
+			ownerID = identity.ID()
+		}
+	}
+
 	group := &store.Group{
 		ID:          api.NewUUID(),
 		Name:        req.Name,
@@ -187,8 +196,8 @@ func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
 		ParentID:    req.ParentID,
 		Labels:      req.Labels,
 		Annotations: req.Annotations,
-		OwnerID:     req.OwnerID,
-		// CreatedBy: TODO: Get from auth context
+		OwnerID:     ownerID,
+		CreatedBy:   createdBy,
 	}
 
 	if err := s.store.CreateGroup(ctx, group); err != nil {
@@ -293,6 +302,15 @@ func (s *Server) updateGroup(w http.ResponseWriter, r *http.Request, id string) 
 		}
 	}
 
+	// Enforce authorization: only group owner or admins can update
+	if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+		decision := s.authzService.CheckAccess(ctx, userIdent, groupResource(group), ActionUpdate)
+		if !decision.Allowed {
+			writeError(w, http.StatusForbidden, ErrCodeForbidden, "Access denied", nil)
+			return
+		}
+	}
+
 	var req UpdateGroupRequest
 	if err := readJSON(r, &req); err != nil {
 		BadRequest(w, "Invalid request body: "+err.Error())
@@ -341,6 +359,15 @@ func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request, id string) 
 		}
 	}
 
+	// Enforce authorization: only group owner or admins can delete
+	if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+		decision := s.authzService.CheckAccess(ctx, userIdent, groupResource(group), ActionDelete)
+		if !decision.Allowed {
+			writeError(w, http.StatusForbidden, ErrCodeForbidden, "Access denied", nil)
+			return
+		}
+	}
+
 	if group.GroupType == store.GroupTypeGroveAgents {
 		BadRequest(w, "grove_agents groups are system-managed and cannot be deleted via API")
 		return
@@ -377,7 +404,7 @@ func (s *Server) handleGroupMembers(w http.ResponseWriter, r *http.Request, grou
 	case http.MethodGet:
 		s.listGroupMembers(w, r, group.ID)
 	case http.MethodPost:
-		s.addGroupMember(w, r, group.ID)
+		s.addGroupMember(w, r, group)
 	default:
 		MethodNotAllowed(w)
 	}
@@ -432,8 +459,18 @@ func (s *Server) resolveGroupMemberDisplayName(ctx context.Context, memberType, 
 	return ""
 }
 
-func (s *Server) addGroupMember(w http.ResponseWriter, r *http.Request, groupID string) {
+func (s *Server) addGroupMember(w http.ResponseWriter, r *http.Request, group *store.Group) {
 	ctx := r.Context()
+	groupID := group.ID
+
+	// Enforce authorization: only group owner or admins can add members
+	if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+		decision := s.authzService.CheckAccess(ctx, userIdent, groupResource(group), ActionAddMember)
+		if !decision.Allowed {
+			writeError(w, http.StatusForbidden, ErrCodeForbidden, "Access denied", nil)
+			return
+		}
+	}
 
 	var req AddGroupMemberRequest
 	if err := readJSON(r, &req); err != nil {
@@ -494,12 +531,12 @@ func (s *Server) addGroupMember(w http.ResponseWriter, r *http.Request, groupID 
 		// Try as ID first, then as slug
 		if _, err := s.store.GetGroup(ctx, req.MemberID); err != nil {
 			if err == store.ErrNotFound {
-				group, slugErr := s.store.GetGroupBySlug(ctx, req.MemberID)
+				memberGroup, slugErr := s.store.GetGroupBySlug(ctx, req.MemberID)
 				if slugErr != nil {
 					ValidationError(w, "group not found: "+req.MemberID, nil)
 					return
 				}
-				resolvedID = group.ID
+				resolvedID = memberGroup.ID
 			} else {
 				writeErrorFromErr(w, err, "")
 				return
@@ -595,7 +632,7 @@ func (s *Server) handleGroupMemberByID(w http.ResponseWriter, r *http.Request, g
 	case http.MethodGet:
 		s.getGroupMember(w, r, group.ID, memberType, memberID)
 	case http.MethodDelete:
-		s.removeGroupMember(w, r, group.ID, memberType, memberID)
+		s.removeGroupMember(w, r, group, memberType, memberID)
 	default:
 		MethodNotAllowed(w)
 	}
@@ -613,10 +650,19 @@ func (s *Server) getGroupMember(w http.ResponseWriter, r *http.Request, groupID,
 	writeJSON(w, http.StatusOK, member)
 }
 
-func (s *Server) removeGroupMember(w http.ResponseWriter, r *http.Request, groupID, memberType, memberID string) {
+func (s *Server) removeGroupMember(w http.ResponseWriter, r *http.Request, group *store.Group, memberType, memberID string) {
 	ctx := r.Context()
 
-	if err := s.store.RemoveGroupMember(ctx, groupID, memberType, memberID); err != nil {
+	// Enforce authorization: only group owner or admins can remove members
+	if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+		decision := s.authzService.CheckAccess(ctx, userIdent, groupResource(group), ActionRemoveMember)
+		if !decision.Allowed {
+			writeError(w, http.StatusForbidden, ErrCodeForbidden, "Access denied", nil)
+			return
+		}
+	}
+
+	if err := s.store.RemoveGroupMember(ctx, group.ID, memberType, memberID); err != nil {
 		writeErrorFromErr(w, err, "")
 		return
 	}
