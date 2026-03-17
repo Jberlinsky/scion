@@ -18,6 +18,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoadSettingsKoanf(t *testing.T) {
@@ -521,4 +524,66 @@ func TestLoadSettingsKoanfWithJSONFallback(t *testing.T) {
 	if s.DefaultTemplate != "json-template" {
 		t.Errorf("expected JSON fallback template 'json-template', got '%s'", s.DefaultTemplate)
 	}
+}
+
+// TestV1GroveIDSurvivesUpdateSetting verifies that grove_id written by
+// writeGroveSettings in v1 format survives UpdateVersionedSetting round-trips.
+// This is a regression test for the bug where grove_id was written at the
+// top level (which VersionedSettings drops on unmarshal), then the first
+// UpdateSetting call (e.g. hub.endpoint) would strip it, causing the global
+// hub.grove_id to bleed into local groves.
+func TestV1GroveIDSurvivesUpdateSetting(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	// Unset env vars that could interfere
+	for _, env := range []string{"SCION_HUB_ENDPOINT", "SCION_HUB_GROVE_ID"} {
+		if orig, ok := os.LookupEnv(env); ok {
+			os.Unsetenv(env)
+			t.Cleanup(func() { os.Setenv(env, orig) })
+		}
+	}
+
+	// Set up a global settings file with a different grove_id (simulating
+	// a previously linked global grove).
+	globalScionDir := filepath.Join(tmpDir, ".scion")
+	require.NoError(t, os.MkdirAll(globalScionDir, 0755))
+	globalSettings := `schema_version: "1"
+hub:
+  grove_id: "global-grove-id-should-not-bleed"
+  endpoint: "https://hub.example.com"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(globalScionDir, "settings.yaml"), []byte(globalSettings), 0644))
+
+	// Simulate writeGroveSettings: create a v1 grove settings file with
+	// grove_id under hub.grove_id (the correct v1 location).
+	groveDir := filepath.Join(tmpDir, "my-project", ".scion")
+	require.NoError(t, os.MkdirAll(groveDir, 0755))
+	groveSettings := `schema_version: "1"
+active_profile: local
+default_template: default
+hub:
+  grove_id: "local-grove-id-12345"
+workspace_path: /tmp/my-project
+`
+	require.NoError(t, os.WriteFile(filepath.Join(groveDir, "settings.yaml"), []byte(groveSettings), 0644))
+
+	// Verify the grove_id loads correctly before any updates.
+	s, err := LoadSettingsKoanf(groveDir)
+	require.NoError(t, err)
+	assert.Equal(t, "local-grove-id-12345", s.GroveID, "grove_id should come from local settings, not global")
+
+	// Simulate what happens when the user runs "scion config set hub.endpoint"
+	// or "scion hub enable" — this calls UpdateSetting which round-trips
+	// through VersionedSettings.
+	require.NoError(t, UpdateSetting(groveDir, "hub.endpoint", "https://hub.new.example.com", false))
+
+	// Reload and verify grove_id survived the round-trip.
+	s2, err := LoadSettingsKoanf(groveDir)
+	require.NoError(t, err)
+	assert.Equal(t, "local-grove-id-12345", s2.GroveID, "grove_id must survive UpdateSetting round-trip")
+	assert.Equal(t, "https://hub.new.example.com", s2.Hub.Endpoint, "hub endpoint should be updated")
 }

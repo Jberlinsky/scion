@@ -614,7 +614,22 @@ func writeGroveSettings(externalPath, workspacePath, groveID string, opt InitPro
 	}
 	settingsMap["workspace_path"] = workspacePath
 	if groveID != "" {
-		settingsMap["grove_id"] = groveID
+		// In v1 format (schema_version: "1"), grove_id is stored under
+		// hub.grove_id, not at the top level. Writing it at the top level
+		// causes it to be silently dropped when UpdateVersionedSetting
+		// round-trips through VersionedSettings (which has no top-level
+		// grove_id field), leading to the global hub.grove_id bleeding
+		// into local groves.
+		if v, _ := settingsMap["schema_version"]; v == "1" {
+			hub, _ := settingsMap["hub"].(map[string]interface{})
+			if hub == nil {
+				hub = make(map[string]interface{})
+				settingsMap["hub"] = hub
+			}
+			hub["grove_id"] = groveID
+		} else {
+			settingsMap["grove_id"] = groveID
+		}
 	}
 
 	data, err := yaml.Marshal(settingsMap)

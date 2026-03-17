@@ -797,3 +797,44 @@ func TestInitMachine_PreservesSettings(t *testing.T) {
 		t.Error("re-init overwrote customized settings.yaml")
 	}
 }
+
+func TestWriteGroveSettings_V1PlacesGroveIDUnderHub(t *testing.T) {
+	tmpDir := t.TempDir()
+	groveID := "test-grove-id-abc123"
+
+	err := writeGroveSettings(tmpDir, "/tmp/project", groveID, InitProjectOpts{SkipRuntimeCheck: true})
+	if err != nil {
+		t.Fatalf("writeGroveSettings failed: %v", err)
+	}
+
+	// Read the written settings file
+	data, err := os.ReadFile(filepath.Join(tmpDir, "settings.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read settings: %v", err)
+	}
+
+	// Parse into a generic map to verify the structure
+	var settingsMap map[string]interface{}
+	if err := yaml.Unmarshal(data, &settingsMap); err != nil {
+		t.Fatalf("failed to parse settings YAML: %v", err)
+	}
+
+	// Verify schema_version is "1" (from default grove settings)
+	if v, _ := settingsMap["schema_version"].(string); v != "1" {
+		t.Skipf("default grove settings are not v1 format (schema_version=%q), skipping v1-specific test", v)
+	}
+
+	// grove_id should NOT be at the top level
+	if _, exists := settingsMap["grove_id"]; exists {
+		t.Error("grove_id should not be at the top level in v1 format; expected it under hub.grove_id")
+	}
+
+	// grove_id should be under hub.grove_id
+	hub, ok := settingsMap["hub"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected hub section in settings")
+	}
+	if hub["grove_id"] != groveID {
+		t.Errorf("expected hub.grove_id=%q, got %v", groveID, hub["grove_id"])
+	}
+}
