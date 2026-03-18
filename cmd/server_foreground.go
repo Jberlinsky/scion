@@ -88,10 +88,13 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 		if err := config.InitGlobal(harness.All()); err != nil {
 			return fmt.Errorf("failed to initialize global config: %w", err)
 		}
-	} else {
-		// Refresh embedded templates and harness-configs from the binary.
-		// This ensures a binary upgrade automatically propagates new defaults
-		// without requiring manual deletion and re-init.
+	} else if productionMode {
+		// In production mode, refresh the default template and harness-configs
+		// from the binary's embeds on every start. This ensures a binary upgrade
+		// automatically propagates new defaults without manual re-init.
+		// Only done in production to avoid overwriting local customizations
+		// during development; admins should use non-default names for custom
+		// templates.
 		if err := config.UpdateDefaultTemplates(true, harness.All()); err != nil {
 			log.Printf("Warning: failed to refresh default templates: %v", err)
 		}
