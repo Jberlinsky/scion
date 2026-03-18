@@ -823,40 +823,90 @@ const (
 )
 
 // =============================================================================
-// API Keys
+// User Access Tokens (UATs)
 // =============================================================================
 
-// APIKey represents an API key stored in the Hub database.
-// API keys are used for programmatic access to the Hub API.
-type APIKey struct {
-	// Identity
-	ID     string `json:"id"`     // UUID primary key
-	UserID string `json:"userId"` // FK to User.ID
+// UserAccessToken represents a scoped personal access token.
+// UATs are opaque bearer tokens that carry grove-scoped, action-limited permissions.
+type UserAccessToken struct {
+	ID      string `json:"id"`     // UUID
+	UserID  string `json:"userId"` // FK to User.ID
+	Name    string `json:"name"`   // User-provided label
+	Prefix  string `json:"prefix"` // First N chars for identification
+	KeyHash string `json:"-"`      // SHA-256 hash (never exposed)
 
-	// Key metadata
-	Name   string `json:"name"`   // User-provided name for the key
-	Prefix string `json:"prefix"` // First 8 chars for identification (sk_live_XXXXXXXX)
+	// Scoping
+	GroveID string   `json:"groveId"` // Required: grove this token is scoped to
+	Scopes  []string `json:"scopes"`  // Action scopes (resource:action pairs)
 
-	// Security - the hash is never exposed in API responses
-	KeyHash string `json:"-"` // SHA-256 hash of the full key
-
-	// Scopes limit what the key can access
-	Scopes []string `json:"scopes,omitempty"`
-
-	// Status
+	// Lifecycle
 	Revoked   bool       `json:"revoked"`
-	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"` // Required for UATs
 	LastUsed  *time.Time `json:"lastUsed,omitempty"`
-
-	// Timestamps
-	Created time.Time `json:"created"`
+	Created   time.Time  `json:"created"`
 }
 
-// APIKeyPrefix constants
+// UATPrefix is the token prefix that distinguishes UATs from other token types.
+const UATPrefix = "scion_pat_"
+
+// UAT scope constants define the allowed capability scopes.
 const (
-	APIKeyPrefixLive = "sk_live_"
-	APIKeyPrefixTest = "sk_test_"
+	UATScopeGroveRead     = "grove:read"
+	UATScopeAgentCreate   = "agent:create"
+	UATScopeAgentRead     = "agent:read"
+	UATScopeAgentList     = "agent:list"
+	UATScopeAgentStart    = "agent:start"
+	UATScopeAgentStop     = "agent:stop"
+	UATScopeAgentDelete   = "agent:delete"
+	UATScopeAgentMessage  = "agent:message"
+	UATScopeAgentAttach   = "agent:attach"
+	UATScopeAgentDispatch = "agent:dispatch"
+	UATScopeAgentManage   = "agent:manage" // Convenience alias
 )
+
+// UATValidScopes is the set of all valid UAT scope strings.
+var UATValidScopes = map[string]bool{
+	UATScopeGroveRead:     true,
+	UATScopeAgentCreate:   true,
+	UATScopeAgentRead:     true,
+	UATScopeAgentList:     true,
+	UATScopeAgentStart:    true,
+	UATScopeAgentStop:     true,
+	UATScopeAgentDelete:   true,
+	UATScopeAgentMessage:  true,
+	UATScopeAgentAttach:   true,
+	UATScopeAgentDispatch: true,
+	UATScopeAgentManage:   true,
+}
+
+// UATManageScopes are the scopes expanded from the agent:manage alias.
+var UATManageScopes = []string{
+	UATScopeAgentCreate,
+	UATScopeAgentRead,
+	UATScopeAgentList,
+	UATScopeAgentStart,
+	UATScopeAgentStop,
+	UATScopeAgentDelete,
+	UATScopeAgentDispatch,
+}
+
+// UATScopeToAction maps a UAT scope to its resource type and action.
+func UATScopeToAction(scope string) (resourceType string, action string) {
+	parts := strings.SplitN(scope, ":", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return parts[0], parts[1]
+}
+
+// UATMaxPerUser is the maximum number of tokens a user may hold.
+const UATMaxPerUser = 50
+
+// UATMaxExpiry is the maximum expiry duration for a UAT (1 year).
+const UATMaxExpiry = 365 * 24 * time.Hour
+
+// UATDefaultExpiry is the default expiry duration when not specified (90 days).
+const UATDefaultExpiry = 90 * 24 * time.Hour
 
 // =============================================================================
 // GCP Service Accounts (GCP Identity for Agents)

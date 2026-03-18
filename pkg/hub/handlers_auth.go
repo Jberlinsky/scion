@@ -17,6 +17,7 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -135,25 +136,28 @@ type CLIAuthTokenResponse struct {
 	User         *UserResponse `json:"user,omitempty"`
 }
 
-// APIKeyCreateRequest is the request body for creating an API key.
-type APIKeyCreateRequest struct {
+// TokenCreateRequest is the request body for creating a user access token.
+type TokenCreateRequest struct {
 	Name      string     `json:"name"`
-	Scopes    []string   `json:"scopes,omitempty"`
+	GroveID   string     `json:"groveId"`
+	Scopes    []string   `json:"scopes"`
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
-// APIKeyCreateResponse is the response for creating an API key.
-type APIKeyCreateResponse struct {
-	Key    string          `json:"key"` // Full key, only shown once
-	APIKey *APIKeyResponse `json:"apiKey"`
+// TokenCreateResponse is the response for creating a user access token.
+type TokenCreateResponse struct {
+	Token       string         `json:"token"` // Full token, only shown once
+	AccessToken *TokenResponse `json:"accessToken"`
 }
 
-// APIKeyResponse is the API key info (without the actual key).
-type APIKeyResponse struct {
+// TokenResponse is the access token info (without the actual token value).
+type TokenResponse struct {
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
-	Prefix    string     `json:"prefix"` // First 8 chars for identification
-	Scopes    []string   `json:"scopes,omitempty"`
+	Prefix    string     `json:"prefix"`
+	GroveID   string     `json:"groveId"`
+	Scopes    []string   `json:"scopes"`
+	Revoked   bool       `json:"revoked"`
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 	LastUsed  *time.Time `json:"lastUsed,omitempty"`
 	Created   time.Time  `json:"created"`
@@ -527,135 +531,187 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAPIKeys routes API key requests.
-func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
+// handleTokens routes user access token requests.
+func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		s.handleListAPIKeys(w, r)
+		s.handleListTokens(w, r)
 	case http.MethodPost:
-		s.handleCreateAPIKey(w, r)
+		s.handleCreateToken(w, r)
 	default:
 		MethodNotAllowed(w)
 	}
 }
 
-// handleAPIKeyByID routes API key requests by ID.
-func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
-	id := extractID(r, "/api/v1/auth/api-keys")
-	if id == "" {
-		s.handleAPIKeys(w, r)
+// handleTokenByID routes user access token requests by ID.
+func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
+	// Check for /revoke suffix
+	path := r.URL.Path
+	base := "/api/v1/auth/tokens/"
+
+	remaining := strings.TrimPrefix(path, base)
+	if remaining == "" {
+		s.handleTokens(w, r)
 		return
 	}
 
+	// Check for {id}/revoke pattern
+	if parts := strings.SplitN(remaining, "/", 2); len(parts) == 2 && parts[1] == "revoke" {
+		if r.Method == http.MethodPost {
+			s.handleRevokeToken(w, r, parts[0])
+		} else {
+			MethodNotAllowed(w)
+		}
+		return
+	}
+
+	id := remaining
+
 	switch r.Method {
+	case http.MethodGet:
+		s.handleGetToken(w, r, id)
 	case http.MethodDelete:
-		s.handleDeleteAPIKey(w, r, id)
+		s.handleDeleteToken(w, r, id)
 	default:
 		MethodNotAllowed(w)
 	}
 }
 
-// handleListAPIKeys handles GET /api/v1/auth/api-keys.
-func (s *Server) handleListAPIKeys(w http.ResponseWriter, r *http.Request) {
+// handleListTokens handles GET /api/v1/auth/tokens.
+func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
 	user := GetUserIdentityFromContext(r.Context())
 	if user == nil {
 		Unauthorized(w)
 		return
 	}
 
-	if s.apiKeyService == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"items": []interface{}{}})
-		return
-	}
-
-	keys, err := s.apiKeyService.ListAPIKeys(r.Context(), user.ID())
+	tokens, err := s.uatService.ListTokens(r.Context(), user.ID())
 	if err != nil {
 		InternalError(w)
 		return
 	}
 
-	// Convert to response format
-	items := make([]APIKeyResponse, 0, len(keys))
-	for _, k := range keys {
-		items = append(items, APIKeyResponse{
-			ID:        k.ID,
-			Name:      k.Name,
-			Prefix:    k.Prefix,
-			Scopes:    k.Scopes,
-			ExpiresAt: k.ExpiresAt,
-			LastUsed:  k.LastUsed,
-			Created:   k.Created,
-		})
+	items := make([]TokenResponse, 0, len(tokens))
+	for _, t := range tokens {
+		items = append(items, tokenToResponse(t))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 }
 
-// handleCreateAPIKey handles POST /api/v1/auth/api-keys.
-func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
+// handleCreateToken handles POST /api/v1/auth/tokens.
+func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	user := GetUserIdentityFromContext(r.Context())
 	if user == nil {
 		Unauthorized(w)
 		return
 	}
 
-	if s.apiKeyService == nil {
-		writeError(w, http.StatusNotImplemented, "not_implemented",
-			"API key management not enabled", nil)
+	// Prevent UAT-creates-UAT: reject if authenticated with a UAT
+	if _, ok := user.(*ScopedUserIdentity); ok {
+		writeError(w, http.StatusForbidden, ErrCodeForbidden,
+			"access tokens cannot create other access tokens", nil)
 		return
 	}
 
-	var req APIKeyCreateRequest
+	var req TokenCreateRequest
 	if err := readJSON(r, &req); err != nil {
 		BadRequest(w, "invalid request body")
 		return
 	}
 
-	if req.Name == "" {
-		ValidationError(w, "name is required", nil)
-		return
-	}
-
-	key, apiKey, err := s.apiKeyService.CreateAPIKey(r.Context(), user.ID(), req.Name, req.Scopes, req.ExpiresAt)
+	key, token, err := s.uatService.CreateToken(r.Context(), user.ID(), req.Name, req.GroveID, req.Scopes, req.ExpiresAt)
 	if err != nil {
-		InternalError(w)
+		switch {
+		case errors.Is(err, ErrUATLimitExceeded):
+			writeError(w, http.StatusConflict, "limit_exceeded", err.Error(), nil)
+		case errors.Is(err, ErrInvalidUATScope):
+			ValidationError(w, err.Error(), nil)
+		case errors.Is(err, ErrUATExpiryTooLong):
+			ValidationError(w, err.Error(), nil)
+		case strings.Contains(err.Error(), "required"):
+			ValidationError(w, err.Error(), nil)
+		case strings.Contains(err.Error(), "grove not found"):
+			ValidationError(w, err.Error(), nil)
+		default:
+			InternalError(w)
+		}
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, APIKeyCreateResponse{
-		Key: key,
-		APIKey: &APIKeyResponse{
-			ID:        apiKey.ID,
-			Name:      apiKey.Name,
-			Prefix:    apiKey.Prefix,
-			Scopes:    apiKey.Scopes,
-			ExpiresAt: apiKey.ExpiresAt,
-			LastUsed:  apiKey.LastUsed,
-			Created:   apiKey.Created,
-		},
+	writeJSON(w, http.StatusCreated, TokenCreateResponse{
+		Token:       key,
+		AccessToken: tokenResponsePtr(token),
 	})
 }
 
-// handleDeleteAPIKey handles DELETE /api/v1/auth/api-keys/{id}.
-func (s *Server) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request, id string) {
+// handleGetToken handles GET /api/v1/auth/tokens/{id}.
+func (s *Server) handleGetToken(w http.ResponseWriter, r *http.Request, id string) {
 	user := GetUserIdentityFromContext(r.Context())
 	if user == nil {
 		Unauthorized(w)
 		return
 	}
 
-	if s.apiKeyService == nil {
-		writeError(w, http.StatusNotImplemented, "not_implemented",
-			"API key management not enabled", nil)
+	token, err := s.uatService.GetToken(r.Context(), user.ID(), id)
+	if err != nil {
+		NotFound(w, "access token")
 		return
 	}
 
-	if err := s.apiKeyService.DeleteAPIKey(r.Context(), user.ID(), id); err != nil {
-		NotFound(w, "API key")
+	resp := tokenToResponse(*token)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleRevokeToken handles POST /api/v1/auth/tokens/{id}/revoke.
+func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request, id string) {
+	user := GetUserIdentityFromContext(r.Context())
+	if user == nil {
+		Unauthorized(w)
+		return
+	}
+
+	if err := s.uatService.RevokeToken(r.Context(), user.ID(), id); err != nil {
+		NotFound(w, "access token")
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDeleteToken handles DELETE /api/v1/auth/tokens/{id}.
+func (s *Server) handleDeleteToken(w http.ResponseWriter, r *http.Request, id string) {
+	user := GetUserIdentityFromContext(r.Context())
+	if user == nil {
+		Unauthorized(w)
+		return
+	}
+
+	if err := s.uatService.DeleteToken(r.Context(), user.ID(), id); err != nil {
+		NotFound(w, "access token")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func tokenToResponse(t store.UserAccessToken) TokenResponse {
+	return TokenResponse{
+		ID:        t.ID,
+		Name:      t.Name,
+		Prefix:    t.Prefix,
+		GroveID:   t.GroveID,
+		Scopes:    t.Scopes,
+		Revoked:   t.Revoked,
+		ExpiresAt: t.ExpiresAt,
+		LastUsed:  t.LastUsed,
+		Created:   t.Created,
+	}
+}
+
+func tokenResponsePtr(t *store.UserAccessToken) *TokenResponse {
+	resp := tokenToResponse(*t)
+	return &resp
 }
 
 // handleCLIAuthAuthorize handles POST /api/v1/auth/cli/authorize.

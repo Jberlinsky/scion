@@ -248,13 +248,6 @@ func WithBearerToken(token string) Option {
 	}
 }
 
-// WithAPIKey sets API key authentication.
-func WithAPIKey(key string) Option {
-	return func(c *client) {
-		c.transport.Auth = &apiclient.APIKeyAuth{Key: key}
-	}
-}
-
 // WithAuthenticator sets a custom authenticator.
 func WithAuthenticator(auth apiclient.Authenticator) Option {
 	return func(c *client) {

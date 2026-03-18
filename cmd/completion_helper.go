@@ -178,9 +178,6 @@ func fetchHubAgents(ctx context.Context, endpoint string, settings *config.Setti
 		if settings.Hub.Token != "" {
 			opts = append(opts, hubclient.WithBearerToken(settings.Hub.Token))
 			authConfigured = true
-		} else if settings.Hub.APIKey != "" {
-			opts = append(opts, hubclient.WithAPIKey(settings.Hub.APIKey))
-			authConfigured = true
 		}
 	}
 

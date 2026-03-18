@@ -79,6 +79,39 @@ func (u *AuthenticatedUser) Role() string { return u.role }
 // ClientType returns the client type (web, cli, api).
 func (u *AuthenticatedUser) ClientType() string { return u.clientType }
 
+// ScopedUserIdentity wraps a UserIdentity with grove and scope constraints.
+// It is produced when authenticating with a User Access Token (UAT).
+type ScopedUserIdentity struct {
+	UserIdentity
+	groveID string
+	scopes  []string
+}
+
+// NewScopedUserIdentity creates a ScopedUserIdentity.
+func NewScopedUserIdentity(user UserIdentity, groveID string, scopes []string) *ScopedUserIdentity {
+	return &ScopedUserIdentity{
+		UserIdentity: user,
+		groveID:      groveID,
+		scopes:       scopes,
+	}
+}
+
+// ScopedGroveID returns the grove this identity is restricted to.
+func (s *ScopedUserIdentity) ScopedGroveID() string { return s.groveID }
+
+// ScopedScopes returns the action scopes this identity is limited to.
+func (s *ScopedUserIdentity) ScopedScopes() []string { return s.scopes }
+
+// HasScope returns true if this identity has the given scope.
+func (s *ScopedUserIdentity) HasScope(scope string) bool {
+	for _, sc := range s.scopes {
+		if sc == scope {
+			return true
+		}
+	}
+	return false
+}
+
 // agentIdentityWrapper wraps AgentTokenClaims to implement AgentIdentity.
 type agentIdentityWrapper struct {
 	*AgentTokenClaims

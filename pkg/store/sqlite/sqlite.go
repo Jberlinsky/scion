@@ -108,6 +108,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV31,
 		migrationV32,
 		migrationV33,
+		migrationV34,
 	}
 
 	// Create migrations table if not exists
@@ -800,6 +801,27 @@ CREATE TABLE IF NOT EXISTS subscription_templates (
 	UNIQUE(grove_id, name)
 );
 CREATE INDEX IF NOT EXISTS idx_sub_templates_grove ON subscription_templates(grove_id);
+`
+
+// Migration V34: User access tokens table (replaces api_keys).
+const migrationV34 = `
+CREATE TABLE IF NOT EXISTS user_access_tokens (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL,
+	name TEXT NOT NULL,
+	prefix TEXT NOT NULL,
+	key_hash TEXT NOT NULL UNIQUE,
+	grove_id TEXT NOT NULL,
+	scopes TEXT NOT NULL,
+	revoked INTEGER NOT NULL DEFAULT 0,
+	expires_at TIMESTAMP,
+	last_used TIMESTAMP,
+	created_at TIMESTAMP NOT NULL,
+	FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+	FOREIGN KEY (grove_id) REFERENCES groves(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_uat_user_id ON user_access_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_uat_key_hash ON user_access_tokens(key_hash);
 `
 
 // Helper functions for JSON marshaling/unmarshaling
@@ -4330,39 +4352,45 @@ func (s *SQLiteStore) GetPoliciesForPrincipals(ctx context.Context, principals [
 }
 
 // ============================================================================
-// API Key Operations
+// User Access Token Operations
 // ============================================================================
 
-func (s *SQLiteStore) CreateAPIKey(ctx context.Context, key *store.APIKey) error {
+func (s *SQLiteStore) CreateUserAccessToken(ctx context.Context, token *store.UserAccessToken) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO api_keys (
-			id, user_id, name, prefix, key_hash, scopes, revoked, expires_at, last_used, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO user_access_tokens (
+			id, user_id, name, prefix, key_hash, grove_id, scopes,
+			revoked, expires_at, last_used, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		key.ID, key.UserID, key.Name, key.Prefix, key.KeyHash,
-		marshalJSON(key.Scopes), key.Revoked,
-		nullableTimePtr(key.ExpiresAt), nullableTimePtr(key.LastUsed), key.Created,
+		token.ID, token.UserID, token.Name, token.Prefix, token.KeyHash,
+		token.GroveID, marshalJSON(token.Scopes),
+		token.Revoked, nullableTimePtr(token.ExpiresAt), nullableTimePtr(token.LastUsed), token.Created,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return store.ErrAlreadyExists
 		}
+		if strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
+			return store.ErrInvalidInput
+		}
 		return err
 	}
 	return nil
 }
 
-func (s *SQLiteStore) GetAPIKey(ctx context.Context, id string) (*store.APIKey, error) {
-	key := &store.APIKey{}
+func (s *SQLiteStore) GetUserAccessToken(ctx context.Context, id string) (*store.UserAccessToken, error) {
+	token := &store.UserAccessToken{}
 	var scopes string
 	var expiresAt, lastUsed sql.NullTime
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, user_id, name, prefix, key_hash, scopes, revoked, expires_at, last_used, created_at
-		FROM api_keys WHERE id = ?
+		SELECT id, user_id, name, prefix, key_hash, grove_id, scopes,
+			revoked, expires_at, last_used, created_at
+		FROM user_access_tokens WHERE id = ?
 	`, id).Scan(
-		&key.ID, &key.UserID, &key.Name, &key.Prefix, &key.KeyHash,
-		&scopes, &key.Revoked, &expiresAt, &lastUsed, &key.Created,
+		&token.ID, &token.UserID, &token.Name, &token.Prefix, &token.KeyHash,
+		&token.GroveID, &scopes,
+		&token.Revoked, &expiresAt, &lastUsed, &token.Created,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -4371,28 +4399,29 @@ func (s *SQLiteStore) GetAPIKey(ctx context.Context, id string) (*store.APIKey, 
 		return nil, err
 	}
 
-	unmarshalJSON(scopes, &key.Scopes)
+	unmarshalJSON(scopes, &token.Scopes)
 	if expiresAt.Valid {
-		key.ExpiresAt = &expiresAt.Time
+		token.ExpiresAt = &expiresAt.Time
 	}
 	if lastUsed.Valid {
-		key.LastUsed = &lastUsed.Time
+		token.LastUsed = &lastUsed.Time
 	}
-
-	return key, nil
+	return token, nil
 }
 
-func (s *SQLiteStore) GetAPIKeyByHash(ctx context.Context, hash string) (*store.APIKey, error) {
-	key := &store.APIKey{}
+func (s *SQLiteStore) GetUserAccessTokenByHash(ctx context.Context, hash string) (*store.UserAccessToken, error) {
+	token := &store.UserAccessToken{}
 	var scopes string
 	var expiresAt, lastUsed sql.NullTime
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, user_id, name, prefix, key_hash, scopes, revoked, expires_at, last_used, created_at
-		FROM api_keys WHERE key_hash = ?
+		SELECT id, user_id, name, prefix, key_hash, grove_id, scopes,
+			revoked, expires_at, last_used, created_at
+		FROM user_access_tokens WHERE key_hash = ?
 	`, hash).Scan(
-		&key.ID, &key.UserID, &key.Name, &key.Prefix, &key.KeyHash,
-		&scopes, &key.Revoked, &expiresAt, &lastUsed, &key.Created,
+		&token.ID, &token.UserID, &token.Name, &token.Prefix, &token.KeyHash,
+		&token.GroveID, &scopes,
+		&token.Revoked, &expiresAt, &lastUsed, &token.Created,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -4401,81 +4430,28 @@ func (s *SQLiteStore) GetAPIKeyByHash(ctx context.Context, hash string) (*store.
 		return nil, err
 	}
 
-	unmarshalJSON(scopes, &key.Scopes)
+	unmarshalJSON(scopes, &token.Scopes)
 	if expiresAt.Valid {
-		key.ExpiresAt = &expiresAt.Time
+		token.ExpiresAt = &expiresAt.Time
 	}
 	if lastUsed.Valid {
-		key.LastUsed = &lastUsed.Time
+		token.LastUsed = &lastUsed.Time
 	}
-
-	return key, nil
+	return token, nil
 }
 
-func (s *SQLiteStore) GetAPIKeyByPrefix(ctx context.Context, prefix string) (*store.APIKey, error) {
-	key := &store.APIKey{}
-	var scopes string
-	var expiresAt, lastUsed sql.NullTime
-
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, user_id, name, prefix, key_hash, scopes, revoked, expires_at, last_used, created_at
-		FROM api_keys WHERE prefix = ?
-	`, prefix).Scan(
-		&key.ID, &key.UserID, &key.Name, &key.Prefix, &key.KeyHash,
-		&scopes, &key.Revoked, &expiresAt, &lastUsed, &key.Created,
-	)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, err
-	}
-
-	unmarshalJSON(scopes, &key.Scopes)
-	if expiresAt.Valid {
-		key.ExpiresAt = &expiresAt.Time
-	}
-	if lastUsed.Valid {
-		key.LastUsed = &lastUsed.Time
-	}
-
-	return key, nil
-}
-
-func (s *SQLiteStore) UpdateAPIKey(ctx context.Context, key *store.APIKey) error {
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE api_keys SET
-			name = ?, scopes = ?, revoked = ?, expires_at = ?, last_used = ?
-		WHERE id = ?
-	`,
-		key.Name, marshalJSON(key.Scopes), key.Revoked,
-		nullableTimePtr(key.ExpiresAt), nullableTimePtr(key.LastUsed),
-		key.ID,
-	)
-	if err != nil {
-		return err
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rowsAffected == 0 {
-		return store.ErrNotFound
-	}
-	return nil
-}
-
-func (s *SQLiteStore) UpdateAPIKeyLastUsed(ctx context.Context, id string) error {
+func (s *SQLiteStore) UpdateUserAccessTokenLastUsed(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
-		"UPDATE api_keys SET last_used = ? WHERE id = ?",
+		"UPDATE user_access_tokens SET last_used = ? WHERE id = ?",
 		time.Now(), id,
 	)
 	return err
 }
 
-func (s *SQLiteStore) DeleteAPIKey(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, "DELETE FROM api_keys WHERE id = ?", id)
+func (s *SQLiteStore) RevokeUserAccessToken(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx,
+		"UPDATE user_access_tokens SET revoked = 1 WHERE id = ?", id,
+	)
 	if err != nil {
 		return err
 	}
@@ -4489,10 +4465,26 @@ func (s *SQLiteStore) DeleteAPIKey(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *SQLiteStore) ListAPIKeys(ctx context.Context, userID string) ([]store.APIKey, error) {
+func (s *SQLiteStore) DeleteUserAccessToken(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, "DELETE FROM user_access_tokens WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListUserAccessTokens(ctx context.Context, userID string) ([]store.UserAccessToken, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, user_id, name, prefix, scopes, revoked, expires_at, last_used, created_at
-		FROM api_keys WHERE user_id = ? AND revoked = 0
+		SELECT id, user_id, name, prefix, grove_id, scopes,
+			revoked, expires_at, last_used, created_at
+		FROM user_access_tokens WHERE user_id = ?
 		ORDER BY created_at DESC
 	`, userID)
 	if err != nil {
@@ -4500,39 +4492,39 @@ func (s *SQLiteStore) ListAPIKeys(ctx context.Context, userID string) ([]store.A
 	}
 	defer rows.Close()
 
-	var keys []store.APIKey
+	var tokens []store.UserAccessToken
 	for rows.Next() {
-		var key store.APIKey
+		var token store.UserAccessToken
 		var scopes string
 		var expiresAt, lastUsed sql.NullTime
 
 		if err := rows.Scan(
-			&key.ID, &key.UserID, &key.Name, &key.Prefix, &scopes,
-			&key.Revoked, &expiresAt, &lastUsed, &key.Created,
+			&token.ID, &token.UserID, &token.Name, &token.Prefix,
+			&token.GroveID, &scopes,
+			&token.Revoked, &expiresAt, &lastUsed, &token.Created,
 		); err != nil {
 			return nil, err
 		}
 
-		unmarshalJSON(scopes, &key.Scopes)
+		unmarshalJSON(scopes, &token.Scopes)
 		if expiresAt.Valid {
-			key.ExpiresAt = &expiresAt.Time
+			token.ExpiresAt = &expiresAt.Time
 		}
 		if lastUsed.Valid {
-			key.LastUsed = &lastUsed.Time
+			token.LastUsed = &lastUsed.Time
 		}
-
-		keys = append(keys, key)
+		tokens = append(tokens, token)
 	}
-
-	return keys, nil
+	return tokens, nil
 }
 
-func (s *SQLiteStore) RevokeUserAPIKeys(ctx context.Context, userID string) error {
-	_, err := s.db.ExecContext(ctx,
-		"UPDATE api_keys SET revoked = 1 WHERE user_id = ?",
+func (s *SQLiteStore) CountUserAccessTokens(ctx context.Context, userID string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM user_access_tokens WHERE user_id = ? AND revoked = 0",
 		userID,
-	)
-	return err
+	).Scan(&count)
+	return count, err
 }
 
 // nullableTimePtr returns a sql.NullTime for a time pointer.

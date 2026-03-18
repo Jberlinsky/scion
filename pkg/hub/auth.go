@@ -36,8 +36,8 @@ type AuthConfig struct {
 	AgentTokenSvc *AgentTokenService
 	// UserTokenSvc handles user JWT validation
 	UserTokenSvc *UserTokenService
-	// APIKeySvc handles API key validation
-	APIKeySvc *APIKeyService
+	// UATSvc handles user access token validation
+	UATSvc *UserAccessTokenService
 	// TrustedProxies is a list of trusted proxy IPs/CIDRs
 	TrustedProxies []string
 	// Debug enables verbose logging
@@ -53,7 +53,7 @@ const (
 	tokenTypeUnknown tokenType = iota
 	tokenTypeDev
 	tokenTypeUser
-	tokenTypeAPIKey
+	tokenTypeUAT
 	tokenTypeAgent
 )
 
@@ -62,7 +62,7 @@ const (
 // 1. Agent tokens (X-Scion-Agent-Token or agent JWT in Bearer)
 // 2. Broker HMAC auth (X-Scion-Broker-ID header) - passed through to BrokerAuthMiddleware
 // 3. Development tokens (scion_dev_* prefix)
-// 4. API keys (sk_live_* or sk_test_* prefix)
+// 4. User access tokens (scion_pat_* prefix)
 // 5. User JWTs
 // 6. Trusted proxy headers
 func UnifiedAuthMiddleware(cfg AuthConfig) func(http.Handler) http.Handler {
@@ -175,22 +175,22 @@ func UnifiedAuthMiddleware(cfg AuthConfig) func(http.Handler) http.Handler {
 					log.Debug("Dev user authenticated")
 				}
 
-			case tokenTypeAPIKey:
-				if cfg.APIKeySvc == nil {
+			case tokenTypeUAT:
+				if cfg.UATSvc == nil {
 					writeError(w, http.StatusUnauthorized, ErrCodeUnauthorized,
-						"API key authentication is not enabled", nil)
+						"user access token authentication is not enabled", nil)
 					return
 				}
-				user, err := cfg.APIKeySvc.ValidateAPIKey(ctx, token)
+				scopedUser, err := cfg.UATSvc.ValidateToken(ctx, token)
 				if err != nil {
 					writeError(w, http.StatusUnauthorized, ErrCodeUnauthorized,
-						"invalid API key", nil)
+						"invalid access token", nil)
 					return
 				}
-				ctx = context.WithValue(ctx, userContextKey{}, user)
-				ctx = contextWithIdentity(ctx, user)
+				ctx = context.WithValue(ctx, userContextKey{}, scopedUser)
+				ctx = contextWithIdentity(ctx, scopedUser)
 				if cfg.Debug {
-					log.Debug("API key authenticated", "email", user.Email())
+					log.Debug("UAT authenticated", "email", scopedUser.Email(), "grove", scopedUser.ScopedGroveID())
 				}
 
 			case tokenTypeUser:
@@ -245,8 +245,8 @@ func detectTokenType(token string) tokenType {
 	switch {
 	case strings.HasPrefix(token, apiclient.DevTokenPrefix):
 		return tokenTypeDev
-	case strings.HasPrefix(token, "sk_live_"), strings.HasPrefix(token, "sk_test_"):
-		return tokenTypeAPIKey
+	case strings.HasPrefix(token, "scion_pat_"):
+		return tokenTypeUAT
 	case looksLikeJWT(token):
 		// Could be user or agent JWT - need to inspect claims
 		// For now, assume user token (agent tokens use X-Scion-Agent-Token)

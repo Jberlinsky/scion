@@ -107,6 +107,13 @@ func (a *AuthzService) CheckAccess(ctx context.Context, identity Identity, resou
 
 // checkAccessForUser evaluates access for a user principal.
 func (a *AuthzService) checkAccessForUser(ctx context.Context, user UserIdentity, resource Resource, action Action) Decision {
+	// 0. If the identity is scoped (UAT), enforce grove + scope constraints first.
+	if scoped, ok := user.(*ScopedUserIdentity); ok {
+		if denied := a.enforceUATConstraints(scoped, resource, action); denied != nil {
+			return *denied
+		}
+	}
+
 	// 1. Admin bypass
 	if user.Role() == "admin" {
 		return Decision{
@@ -355,6 +362,29 @@ func evaluateConditions(policy store.Policy, resource Resource) bool {
 	}
 
 	return true
+}
+
+// enforceUATConstraints checks the grove and scope restrictions carried by a
+// ScopedUserIdentity (produced from a UAT). Returns a deny Decision if the
+// request falls outside the token's allowed grove or scopes, nil otherwise.
+func (a *AuthzService) enforceUATConstraints(scoped *ScopedUserIdentity, resource Resource, action Action) *Decision {
+	// Enforce grove constraint: the resource must belong to the token's grove.
+	groveID := scoped.ScopedGroveID()
+	if resource.Type == "grove" {
+		if resource.ID != groveID {
+			return &Decision{Allowed: false, Reason: "token not scoped for this grove"}
+		}
+	} else if resource.ParentType == "grove" && resource.ParentID != groveID {
+		return &Decision{Allowed: false, Reason: "token not scoped for this grove"}
+	}
+
+	// Enforce scope constraint: the resource:action must be in the token's scopes.
+	scope := resource.Type + ":" + string(action)
+	if !scoped.HasScope(scope) {
+		return &Decision{Allowed: false, Reason: "token does not have scope: " + scope}
+	}
+
+	return nil
 }
 
 // evaluateTimeConditions checks time-based conditions.

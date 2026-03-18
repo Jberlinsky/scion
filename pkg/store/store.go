@@ -73,8 +73,8 @@ type Store interface {
 	// Policy operations (Hub Permissions System)
 	PolicyStore
 
-	// API Key operations
-	APIKeyStore
+	// User Access Token operations
+	UserAccessTokenStore
 
 	// Broker Secret operations (Runtime Broker authentication)
 	BrokerSecretStore
@@ -619,43 +619,38 @@ type PolicyFilter struct {
 }
 
 // =============================================================================
-// API Keys
+// User Access Tokens (UATs)
 // =============================================================================
 
-// APIKeyStore defines API key persistence operations.
-type APIKeyStore interface {
-	// CreateAPIKey creates a new API key record.
-	// Returns the created key (with ID set).
-	CreateAPIKey(ctx context.Context, key *APIKey) error
+// UserAccessTokenStore defines user access token persistence operations.
+type UserAccessTokenStore interface {
+	// CreateUserAccessToken creates a new user access token record.
+	CreateUserAccessToken(ctx context.Context, token *UserAccessToken) error
 
-	// GetAPIKey retrieves an API key by ID.
-	// Returns ErrNotFound if the key doesn't exist.
-	GetAPIKey(ctx context.Context, id string) (*APIKey, error)
+	// GetUserAccessToken retrieves a user access token by ID.
+	// Returns ErrNotFound if the token doesn't exist.
+	GetUserAccessToken(ctx context.Context, id string) (*UserAccessToken, error)
 
-	// GetAPIKeyByHash retrieves an API key by its hash.
-	// Returns ErrNotFound if the key doesn't exist.
-	GetAPIKeyByHash(ctx context.Context, hash string) (*APIKey, error)
+	// GetUserAccessTokenByHash retrieves a user access token by its key hash.
+	// Returns ErrNotFound if the token doesn't exist.
+	GetUserAccessTokenByHash(ctx context.Context, hash string) (*UserAccessToken, error)
 
-	// GetAPIKeyByPrefix retrieves an API key by its prefix.
-	// Returns ErrNotFound if the key doesn't exist.
-	GetAPIKeyByPrefix(ctx context.Context, prefix string) (*APIKey, error)
+	// UpdateUserAccessTokenLastUsed updates the last used timestamp.
+	UpdateUserAccessTokenLastUsed(ctx context.Context, id string) error
 
-	// UpdateAPIKey updates an existing API key.
-	// Returns ErrNotFound if the key doesn't exist.
-	UpdateAPIKey(ctx context.Context, key *APIKey) error
+	// RevokeUserAccessToken marks a token as revoked.
+	// Returns ErrNotFound if the token doesn't exist.
+	RevokeUserAccessToken(ctx context.Context, id string) error
 
-	// UpdateAPIKeyLastUsed updates the last used timestamp.
-	UpdateAPIKeyLastUsed(ctx context.Context, id string) error
+	// DeleteUserAccessToken permanently removes a token by ID.
+	// Returns ErrNotFound if the token doesn't exist.
+	DeleteUserAccessToken(ctx context.Context, id string) error
 
-	// DeleteAPIKey removes an API key by ID.
-	// Returns ErrNotFound if the key doesn't exist.
-	DeleteAPIKey(ctx context.Context, id string) error
+	// ListUserAccessTokens returns all non-deleted tokens for a user.
+	ListUserAccessTokens(ctx context.Context, userID string) ([]UserAccessToken, error)
 
-	// ListAPIKeys returns API keys for a user.
-	ListAPIKeys(ctx context.Context, userID string) ([]APIKey, error)
-
-	// RevokeUserAPIKeys revokes all API keys for a user.
-	RevokeUserAPIKeys(ctx context.Context, userID string) error
+	// CountUserAccessTokens returns the number of active (non-revoked) tokens for a user.
+	CountUserAccessTokens(ctx context.Context, userID string) (int, error)
 }
 
 // =============================================================================

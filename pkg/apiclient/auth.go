@@ -42,22 +42,6 @@ func (a *BearerAuth) ApplyAuth(req *http.Request) error {
 // Refresh indicates that refresh is not supported for static tokens.
 func (a *BearerAuth) Refresh() (bool, error) { return false, nil }
 
-// APIKeyAuth implements API key authentication.
-type APIKeyAuth struct {
-	Key string
-}
-
-// ApplyAuth adds the API key to the X-API-Key header.
-func (a *APIKeyAuth) ApplyAuth(req *http.Request) error {
-	if a.Key != "" {
-		req.Header.Set("X-API-Key", a.Key)
-	}
-	return nil
-}
-
-// Refresh indicates that refresh is not supported for API keys.
-func (a *APIKeyAuth) Refresh() (bool, error) { return false, nil }
-
 // BrokerTokenAuth implements Runtime Broker token authentication.
 type BrokerTokenAuth struct {
 	Token string

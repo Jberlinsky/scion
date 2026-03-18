@@ -342,26 +342,6 @@ func TestWithBearerToken(t *testing.T) {
 	}
 }
 
-func TestWithAPIKey(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		apiKey := r.Header.Get("X-API-Key")
-		if apiKey != "my-api-key" {
-			t.Errorf("expected 'my-api-key', got %q", apiKey)
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(HealthResponse{Status: "ok"})
-	}))
-	defer server.Close()
-
-	client, _ := New(server.URL, WithAPIKey("my-api-key"))
-	_, err := client.Health(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestWithAgentToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Should use X-Scion-Agent-Token header, NOT Authorization: Bearer

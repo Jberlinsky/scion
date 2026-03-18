@@ -73,8 +73,6 @@ type ServerConfig struct {
 	UserTokenConfig UserTokenConfig
 	// TrustedProxies is a list of trusted proxy IPs/CIDRs for forwarded headers.
 	TrustedProxies []string
-	// EnableAPIKeys enables API key authentication.
-	EnableAPIKeys bool
 	// Debug enables verbose debug logging.
 	Debug bool
 	// OAuthConfig holds OAuth provider credentials for CLI authentication.
@@ -394,7 +392,7 @@ type Server struct {
 	secretBackend          secret.SecretBackend    // Optional secret backend
 	agentTokenService      *AgentTokenService      // Agent JWT token service
 	userTokenService       *UserTokenService       // User JWT token service
-	apiKeyService          *APIKeyService          // API key service
+	uatService             *UserAccessTokenService // User access token service
 	oauthService           *OAuthService           // OAuth service for CLI authentication
 	authConfig             AuthConfig              // Unified auth configuration
 	brokerAuthService      *BrokerAuthService      // Broker HMAC authentication service
@@ -501,10 +499,8 @@ func New(cfg ServerConfig, s store.Store) *Server {
 		srv.userTokenService = userTokenService
 	}
 
-	// Initialize API key service if enabled
-	if cfg.EnableAPIKeys {
-		srv.apiKeyService = NewAPIKeyService(s, s)
-	}
+	// Initialize user access token service
+	srv.uatService = NewUserAccessTokenService(s, s, s)
 
 	// Initialize OAuth service if configured
 	if cfg.OAuthConfig.IsConfigured() {
@@ -590,7 +586,7 @@ func New(cfg ServerConfig, s store.Store) *Server {
 		DevAuthToken:   cfg.DevAuthToken,
 		AgentTokenSvc:  srv.agentTokenService,
 		UserTokenSvc:   srv.userTokenService,
-		APIKeySvc:      srv.apiKeyService,
+		UATSvc:         srv.uatService,
 		TrustedProxies: cfg.TrustedProxies,
 		Debug:          cfg.Debug,
 		Logger:         srv.authLog,
@@ -815,11 +811,11 @@ func (s *Server) GetUserTokenService() *UserTokenService {
 	return s.userTokenService
 }
 
-// GetAPIKeyService returns the API key service.
-func (s *Server) GetAPIKeyService() *APIKeyService {
+// GetUATService returns the user access token service.
+func (s *Server) GetUATService() *UserAccessTokenService {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.apiKeyService
+	return s.uatService
 }
 
 // GetOAuthService returns the OAuth service.
@@ -1572,8 +1568,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v1/auth/validate", s.handleAuthValidate)
 	s.mux.HandleFunc("/api/v1/auth/logout", s.handleAuthLogout)
 	s.mux.HandleFunc("/api/v1/auth/me", s.handleAuthMe)
-	s.mux.HandleFunc("/api/v1/auth/api-keys", s.handleAPIKeys)
-	s.mux.HandleFunc("/api/v1/auth/api-keys/", s.handleAPIKeyByID)
+	s.mux.HandleFunc("/api/v1/auth/tokens", s.handleTokens)
+	s.mux.HandleFunc("/api/v1/auth/tokens/", s.handleTokenByID)
 
 	// CLI OAuth endpoints (unauthenticated - used for login)
 	s.mux.HandleFunc("/api/v1/auth/cli/authorize", s.handleCLIAuthAuthorize)

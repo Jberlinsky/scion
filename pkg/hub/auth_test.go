@@ -311,8 +311,7 @@ func TestDetectTokenType(t *testing.T) {
 		expected tokenType
 	}{
 		{apiclient.DevTokenPrefix + "abc123", tokenTypeDev},
-		{"sk_live_abc123", tokenTypeAPIKey},
-		{"sk_test_abc123", tokenTypeAPIKey},
+		{"scion_pat_abc123def456", tokenTypeUAT},
 		{"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U", tokenTypeUser},
 		{"random-string", tokenTypeUnknown},
 		{"", tokenTypeUnknown},
