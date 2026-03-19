@@ -23,6 +23,7 @@ import (
 
 func TestEnsureScionGitignore_AddsEntry(t *testing.T) {
 	tmpDir := t.TempDir()
+	setupGitRepoDir(t, tmpDir)
 
 	// No .gitignore exists yet
 	if err := EnsureScionGitignore(tmpDir); err != nil {
@@ -40,8 +41,9 @@ func TestEnsureScionGitignore_AddsEntry(t *testing.T) {
 
 func TestEnsureScionGitignore_Idempotent(t *testing.T) {
 	tmpDir := t.TempDir()
+	setupGitRepoDir(t, tmpDir)
 
-	// Write .gitignore with .scion/ already present
+	// Write .gitignore with .scion/ already present (covers agents/ too)
 	os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte("node_modules/\n.scion/\n"), 0644)
 
 	if err := EnsureScionGitignore(tmpDir); err != nil {
@@ -59,8 +61,9 @@ func TestEnsureScionGitignore_Idempotent(t *testing.T) {
 
 func TestEnsureScionGitignore_AppendsToExisting(t *testing.T) {
 	tmpDir := t.TempDir()
+	setupGitRepoDir(t, tmpDir)
 
-	// Write .gitignore without trailing newline
+	// Write .gitignore without trailing newline and without .scion coverage
 	os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte("node_modules/"), 0644)
 
 	if err := EnsureScionGitignore(tmpDir); err != nil {
@@ -77,22 +80,26 @@ func TestEnsureScionGitignore_AppendsToExisting(t *testing.T) {
 }
 
 func TestEnsureScionGitignore_RecognizesVariants(t *testing.T) {
+	// All of these patterns cause git check-ignore to report .scion/agents/ as ignored
 	for _, pattern := range []string{".scion", ".scion/", "/.scion", "/.scion/", ".scion/agents", ".scion/agents/"} {
-		tmpDir := t.TempDir()
-		os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(pattern+"\n"), 0644)
+		t.Run(pattern, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			setupGitRepoDir(t, tmpDir)
+			os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte(pattern+"\n"), 0644)
 
-		if err := EnsureScionGitignore(tmpDir); err != nil {
-			t.Fatalf("EnsureScionGitignore failed for pattern %q: %v", pattern, err)
-		}
+			if err := EnsureScionGitignore(tmpDir); err != nil {
+				t.Fatalf("EnsureScionGitignore failed for pattern %q: %v", pattern, err)
+			}
 
-		content, err := os.ReadFile(filepath.Join(tmpDir, ".gitignore"))
-		if err != nil {
-			t.Fatalf("failed to read .gitignore: %v", err)
-		}
-		// Should not have added another entry
-		if string(content) != pattern+"\n" {
-			t.Errorf("for pattern %q: expected no change, got %q", pattern, string(content))
-		}
+			content, err := os.ReadFile(filepath.Join(tmpDir, ".gitignore"))
+			if err != nil {
+				t.Fatalf("failed to read .gitignore: %v", err)
+			}
+			// Should not have added another entry
+			if string(content) != pattern+"\n" {
+				t.Errorf("for pattern %q: expected no change, got %q", pattern, string(content))
+			}
+		})
 	}
 }
 

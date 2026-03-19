@@ -22,7 +22,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/GoogleCloudPlatform/scion/pkg/api"
 	"github.com/GoogleCloudPlatform/scion/pkg/util"
@@ -370,11 +369,13 @@ func InitProject(targetDir string, harnesses []api.Harness, opts ...InitProjectO
 		}
 	}
 
-	// Enforce .scion in .gitignore for git repos
+	// Enforce .scion/agents/ in .gitignore for git repos
 	if isGit {
 		root, err := util.RepoRoot()
 		if err == nil {
-			_ = EnsureScionGitignore(root)
+			if err := EnsureScionGitignore(root); err != nil {
+				return fmt.Errorf("failed to update .gitignore: %w", err)
+			}
 		}
 	}
 
@@ -756,10 +757,18 @@ func InitGlobal(harnesses []api.Harness, opts ...InitMachineOpts) error {
 	return InitMachine(harnesses, opts...)
 }
 
-// EnsureScionGitignore ensures that .scion/ is listed in the .gitignore file
-// at the given repo root. If .scion or .scion/ is already ignored by any
-// pattern, this is a no-op.
+// EnsureScionGitignore ensures that .scion/agents/ is ignored by git at the
+// given repo root. It uses git check-ignore to detect whether any existing
+// pattern (in any .gitignore or global excludes) already covers the path.
+// If not, it appends .scion/agents/ to the root .gitignore file.
+// Only the agents directory is excluded; templates/ and other config can be committed.
 func EnsureScionGitignore(repoRoot string) error {
+	// Use git check-ignore for authoritative detection — this respects all
+	// gitignore sources (nested .gitignore, global excludes, etc.).
+	if util.IsIgnored(repoRoot, ".scion/agents/") {
+		return nil
+	}
+
 	gitignorePath := filepath.Join(repoRoot, ".gitignore")
 
 	content, err := os.ReadFile(gitignorePath)
@@ -767,18 +776,7 @@ func EnsureScionGitignore(repoRoot string) error {
 		return err
 	}
 
-	// Check if .scion agents dir is already covered by an existing pattern.
-	// A broad .scion/ pattern also covers agents/, so treat it as already handled.
-	for _, line := range strings.Split(string(content), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == ".scion" || trimmed == ".scion/" || trimmed == "/.scion" || trimmed == "/.scion/" ||
-			trimmed == ".scion/agents" || trimmed == ".scion/agents/" {
-			return nil
-		}
-	}
-
-	// Append .scion/agents/ to .gitignore. Only the agents directory (worktrees and
-	// agent homes) is excluded; templates/ and other config files can be committed.
+	// Append .scion/agents/ to .gitignore.
 	var newContent string
 	if len(content) > 0 && content[len(content)-1] != '\n' {
 		newContent = string(content) + "\n.scion/agents/\n"
