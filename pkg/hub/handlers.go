@@ -7561,6 +7561,11 @@ func (s *Server) handlePublicSettings(w http.ResponseWriter, r *http.Request) {
 // Grove Template Sync
 // ============================================================================
 
+// SyncTemplatesRequest is the optional request body for template sync.
+type SyncTemplatesRequest struct {
+	RepoURL string `json:"repoUrl,omitempty"`
+}
+
 // SyncTemplatesResponse is returned when a template sync agent is dispatched.
 type SyncTemplatesResponse struct {
 	AgentID string `json:"agentId"`
@@ -7603,6 +7608,13 @@ func (s *Server) handleGroveSyncTemplates(w http.ResponseWriter, r *http.Request
 	} else {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required", nil)
 		return
+	}
+
+	// Parse optional request body for repoUrl.
+	var req SyncTemplatesRequest
+	if r.Body != nil {
+		// Ignore decode errors for empty bodies (the field is optional).
+		_ = readJSON(r, &req)
 	}
 
 	// Verify grove exists
@@ -7664,6 +7676,21 @@ func (s *Server) handleGroveSyncTemplates(w http.ResponseWriter, r *http.Request
 	// immediately because there are no templates to find.
 	s.populateAgentConfig(agent, grove, nil)
 
+	// For non-git groves, allow loading templates from an external repo URL.
+	if req.RepoURL != "" && grove.GitRemote == "" {
+		cleanedURL := cleanTemplateRepoURL(req.RepoURL)
+		if !util.IsGitURL(cleanedURL) {
+			writeError(w, http.StatusBadRequest, "invalid_repo_url", "The provided URL is not a valid git repository URL", nil)
+			return
+		}
+		cloneURL := util.ToHTTPSCloneURL(cleanedURL)
+		agent.AppliedConfig.GitClone = &api.GitCloneConfig{
+			URL:    cloneURL,
+			Branch: "main",
+			Depth:  1,
+		}
+	}
+
 	if err := s.store.CreateAgent(ctx, agent); err != nil {
 		writeErrorFromErr(w, err, "")
 		return
@@ -7694,4 +7721,21 @@ func (s *Server) handleGroveSyncTemplates(w http.ResponseWriter, r *http.Request
 		AgentID: agent.ID,
 		Status:  "syncing",
 	})
+}
+
+// cleanTemplateRepoURL strips .scion/templates suffixes and common
+// repository browse paths (e.g. /tree/main) from a URL so that it can
+// be normalized to a plain clone URL.
+func cleanTemplateRepoURL(rawURL string) string {
+	// Strip .scion/templates suffix (with optional trailing slash).
+	if idx := strings.Index(rawURL, "/.scion/templates"); idx >= 0 {
+		rawURL = rawURL[:idx]
+	}
+	// Strip GitHub/GitLab browse path segments (longer patterns first).
+	for _, seg := range []string{"/-/tree/", "/-/blob/", "/tree/", "/blob/"} {
+		if idx := strings.Index(rawURL, seg); idx >= 0 {
+			rawURL = rawURL[:idx]
+		}
+	}
+	return strings.TrimRight(rawURL, "/")
 }

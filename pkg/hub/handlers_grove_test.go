@@ -1196,6 +1196,112 @@ func TestGroveSyncTemplates_GroveNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
+// TestGroveSyncTemplates_RepoURL verifies that a non-git grove can load
+// templates from an external repo URL.
+func TestGroveSyncTemplates_RepoURL(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	broker := &store.RuntimeBroker{
+		ID:     "broker-sync-repourl",
+		Slug:   "sync-repourl-broker",
+		Name:   "Sync RepoURL Broker",
+		Status: store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
+
+	grove := &store.Grove{
+		ID:                     "grove-sync-repourl",
+		Slug:                   "sync-repourl-grove",
+		Name:                   "Sync RepoURL Grove",
+		DefaultRuntimeBrokerID: broker.ID,
+		// No GitRemote — this is a non-git grove.
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+	require.NoError(t, s.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID:  grove.ID,
+		BrokerID: broker.ID,
+		Status:   store.BrokerStatusOnline,
+		LinkedBy: "test",
+	}))
+
+	disp := &createAgentDispatcher{createPhase: string(state.PhaseRunning)}
+	srv.SetDispatcher(disp)
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/groves/"+grove.ID+"/sync-templates",
+		SyncTemplatesRequest{RepoURL: "https://github.com/example/templates.git"})
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	var resp SyncTemplatesResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+
+	agent, err := s.GetAgent(ctx, resp.AgentID)
+	require.NoError(t, err)
+
+	require.NotNil(t, agent.AppliedConfig)
+	require.NotNil(t, agent.AppliedConfig.GitClone, "non-git grove with repoUrl should have GitClone config")
+	assert.Equal(t, "https://github.com/example/templates.git", agent.AppliedConfig.GitClone.URL)
+	assert.Equal(t, "main", agent.AppliedConfig.GitClone.Branch)
+	assert.Equal(t, 1, agent.AppliedConfig.GitClone.Depth)
+}
+
+// TestGroveSyncTemplates_RepoURL_InvalidURL verifies that an invalid repo URL is rejected.
+func TestGroveSyncTemplates_RepoURL_InvalidURL(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	broker := &store.RuntimeBroker{
+		ID:     "broker-sync-badurl",
+		Slug:   "sync-badurl-broker",
+		Name:   "Sync BadURL Broker",
+		Status: store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
+
+	grove := &store.Grove{
+		ID:                     "grove-sync-badurl",
+		Slug:                   "sync-badurl-grove",
+		Name:                   "Sync BadURL Grove",
+		DefaultRuntimeBrokerID: broker.ID,
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+	require.NoError(t, s.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID:  grove.ID,
+		BrokerID: broker.ID,
+		Status:   store.BrokerStatusOnline,
+		LinkedBy: "test",
+	}))
+
+	disp := &createAgentDispatcher{createPhase: string(state.PhaseRunning)}
+	srv.SetDispatcher(disp)
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/groves/"+grove.ID+"/sync-templates",
+		SyncTemplatesRequest{RepoURL: "not-a-url"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// TestCleanTemplateRepoURL verifies URL cleaning for template repo URLs.
+func TestCleanTemplateRepoURL(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"https://github.com/org/repo", "https://github.com/org/repo"},
+		{"https://github.com/org/repo/.scion/templates", "https://github.com/org/repo"},
+		{"https://github.com/org/repo/.scion/templates/", "https://github.com/org/repo"},
+		{"https://github.com/org/repo/tree/main/.scion/templates", "https://github.com/org/repo"},
+		{"https://github.com/org/repo/tree/develop", "https://github.com/org/repo"},
+		{"git@github.com:org/repo.git", "git@github.com:org/repo.git"},
+		{"https://gitlab.com/org/repo/-/tree/main/.scion/templates", "https://gitlab.com/org/repo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := cleanTemplateRepoURL(tt.input)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // TestGroveRegister_CreatesMembershipGroup verifies that registering a new grove
 // automatically creates a membership group with the caller as owner.
 func TestGroveRegister_CreatesMembershipGroup(t *testing.T) {

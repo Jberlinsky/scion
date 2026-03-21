@@ -110,6 +110,9 @@ export class ScionPageGroveSettings extends LitElement {
   private syncSuccess: string | null = null;
 
   @state()
+  private syncRepoUrl = '';
+
+  @state()
   private membersGroup: AdminGroup | null = null;
 
   @state()
@@ -975,9 +978,12 @@ export class ScionPageGroveSettings extends LitElement {
     this.syncSuccess = null;
 
     try {
-      const response = await apiFetch(`/api/v1/groves/${this.groveId}/sync-templates`, {
-        method: 'POST',
-      });
+      const fetchOpts: RequestInit = { method: 'POST' };
+      if (this.syncRepoUrl) {
+        fetchOpts.headers = { 'Content-Type': 'application/json' };
+        fetchOpts.body = JSON.stringify({ repoUrl: this.syncRepoUrl });
+      }
+      const response = await apiFetch(`/api/v1/groves/${this.groveId}/sync-templates`, fetchOpts);
 
       if (!response.ok) {
         throw new Error(await extractApiError(response, `Failed to start template sync: HTTP ${response.status}`));
@@ -1742,18 +1748,20 @@ export class ScionPageGroveSettings extends LitElement {
   }
 
   private renderTemplatesContent() {
+    const isGitGrove = !!this.grove?.gitRemote;
+    const canSync = canAny(this.grove!._capabilities, 'update', 'manage');
     return html`
       <div class="section-header" style="margin-bottom: 1rem;">
         <div class="section-header-text">
           <p style="margin: 0;">Grove-scoped agent templates synced to the Hub.</p>
         </div>
-        ${canAny(this.grove!._capabilities, 'update', 'manage')
+        ${canSync
           ? html`
               <sl-button
                 size="small"
                 variant="default"
                 ?loading=${this.syncLoading}
-                ?disabled=${this.syncLoading}
+                ?disabled=${this.syncLoading || (!isGitGrove && !this.syncRepoUrl)}
                 @click=${() => this.handleSyncTemplates()}
               >
                 <sl-icon slot="prefix" name="arrow-repeat"></sl-icon>
@@ -1762,12 +1770,39 @@ export class ScionPageGroveSettings extends LitElement {
             `
           : ''}
       </div>
+      ${canSync && !isGitGrove
+        ? html`
+            <div style="margin-bottom: 1rem;">
+              <sl-input
+                label="Load from repo"
+                placeholder="https://github.com/org/repo"
+                size="small"
+                clearable
+                .value=${this.syncRepoUrl}
+                ?disabled=${this.syncLoading}
+                @sl-input=${(e: Event) => {
+                  this.syncRepoUrl = (e.target as HTMLInputElement).value;
+                }}
+                @sl-clear=${() => {
+                  this.syncRepoUrl = '';
+                }}
+              >
+                <sl-icon slot="prefix" name="github"></sl-icon>
+              </sl-input>
+              <div style="margin-top: 0.25rem; font-size: 0.75rem; color: var(--sl-color-neutral-500);">
+                Git repository URL containing templates in <code>.scion/templates</code>
+              </div>
+            </div>
+          `
+        : ''}
 
       ${this.syncLoading
         ? html`
             <div class="sync-status syncing">
               <sl-spinner style="font-size: 0.875rem;"></sl-spinner>
-              Syncing templates from grove...
+              ${isGitGrove || !this.syncRepoUrl
+                ? 'Syncing templates from grove...'
+                : `Syncing templates from ${this.syncRepoUrl}...`}
             </div>
           `
         : ''}
@@ -1812,9 +1847,11 @@ export class ScionPageGroveSettings extends LitElement {
               <div class="empty-templates">
                 <sl-icon name="file-earmark"></sl-icon>
                 <p>No grove templates synced yet.</p>
-                ${canAny(this.grove!._capabilities, 'update', 'manage')
+                ${canSync
                   ? html`<p>
-                      Use "Load Templates" to sync templates from the grove's filesystem.
+                      ${isGitGrove
+                        ? 'Use "Load Templates" to sync templates from the grove\'s repository.'
+                        : 'Enter a repository URL above and click "Load Templates" to import templates.'}
                     </p>`
                   : ''}
               </div>
