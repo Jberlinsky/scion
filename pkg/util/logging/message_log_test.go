@@ -92,7 +92,9 @@ func TestPromoteMessageAttrToLabels(t *testing.T) {
 		promoted bool
 	}{
 		{"sender promoted", AttrSender, "user:alice", true},
+		{"sender_id promoted", AttrSenderID, "user-uuid-123", true},
 		{"recipient promoted", AttrRecipient, "agent:dev", true},
+		{"recipient_id promoted", AttrRecipientID, "agent-uuid-456", true},
 		{"msg_type promoted", AttrMsgType, "instruction", true},
 		{"agent_id not promoted by message func", AttrAgentID, "abc123", false},
 		{"arbitrary not promoted", "foo", "bar", false},

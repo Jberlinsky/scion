@@ -48,7 +48,9 @@ type StructuredMessage struct {
 	Version     int      `json:"version"`
 	Timestamp   string   `json:"timestamp"`
 	Sender      string   `json:"sender"`
+	SenderID    string   `json:"sender_id,omitempty"`
 	Recipient   string   `json:"recipient"`
+	RecipientID string   `json:"recipient_id,omitempty"`
 	Msg         string   `json:"msg"`
 	Type        string   `json:"type"`
 	Plain       bool     `json:"plain,omitempty"`
@@ -117,7 +119,7 @@ func NewNotification(sender, recipient, msg, msgType string) *StructuredMessage 
 
 // LogAttrs returns slog attributes for structured logging of this message.
 func (m *StructuredMessage) LogAttrs() []any {
-	return []any{
+	attrs := []any{
 		"sender", m.Sender,
 		"recipient", m.Recipient,
 		"msg_type", m.Type,
@@ -126,6 +128,13 @@ func (m *StructuredMessage) LogAttrs() []any {
 		"broadcasted", m.Broadcasted,
 		"plain", m.Plain,
 	}
+	if m.SenderID != "" {
+		attrs = append(attrs, "sender_id", m.SenderID)
+	}
+	if m.RecipientID != "" {
+		attrs = append(attrs, "recipient_id", m.RecipientID)
+	}
+	return attrs
 }
 
 // SenderPrefix returns the type prefix for a sender identity string.

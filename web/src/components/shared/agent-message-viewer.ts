@@ -369,12 +369,21 @@ export class ScionAgentMessageViewer extends LitElement {
     const urgent = (payload['urgent'] === true) || (labels['urgent'] === 'true');
     const broadcasted = (payload['broadcasted'] === true) || (labels['broadcasted'] === 'true');
 
-    // Determine direction relative to this agent.
-    // Use the agent_id label (unique ID) to determine if this agent is the
-    // target/recipient. If the log entry's agent_id matches our agentId, this
-    // is a received message; otherwise this agent must be the sender.
-    const entryAgentId = labels['agent_id'] || '';
-    const direction: 'sent' | 'received' = entryAgentId === this.agentId ? 'received' : 'sent';
+    // Determine direction relative to this agent using unique IDs.
+    // Check sender_id and recipient_id labels first (UUID-based, unambiguous).
+    // Fall back to agent_id label for older log entries.
+    const senderIdLabel = labels['sender_id'] || '';
+    const recipientIdLabel = labels['recipient_id'] || '';
+    let direction: 'sent' | 'received';
+    if (senderIdLabel === this.agentId) {
+      direction = 'sent';
+    } else if (recipientIdLabel === this.agentId) {
+      direction = 'received';
+    } else {
+      // Fallback for entries logged before sender_id/recipient_id were added
+      const entryAgentId = labels['agent_id'] || '';
+      direction = entryAgentId === this.agentId ? 'received' : 'sent';
+    }
 
     // Extract message body from the payload.
     // payload['message'] and entry.message are the Cloud Logging message

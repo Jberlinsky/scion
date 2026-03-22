@@ -27,9 +27,11 @@ const MessageLogID = "scion-messages"
 
 // Standard attribute keys for message log entries.
 const (
-	AttrSender    = "sender"
-	AttrRecipient = "recipient"
-	AttrMsgType   = "msg_type"
+	AttrSender      = "sender"
+	AttrSenderID    = "sender_id"
+	AttrRecipient   = "recipient"
+	AttrRecipientID = "recipient_id"
+	AttrMsgType     = "msg_type"
 )
 
 // MessageLoggerConfig configures the dedicated message logger.
@@ -197,7 +199,7 @@ func (h *messageCloudHandler) WithGroup(name string) slog.Handler {
 // promoteMessageAttrToLabels promotes message-specific attributes to GCP labels.
 func promoteMessageAttrToLabels(labels map[string]string, a slog.Attr) {
 	switch a.Key {
-	case AttrSender, AttrRecipient, AttrMsgType:
+	case AttrSender, AttrSenderID, AttrRecipient, AttrRecipientID, AttrMsgType:
 		if v := a.Value.String(); v != "" {
 			labels[a.Key] = v
 		}

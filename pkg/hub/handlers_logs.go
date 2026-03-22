@@ -300,11 +300,9 @@ func (s *Server) handleAgentMessageLogs(w http.ResponseWriter, r *http.Request, 
 
 	query := r.URL.Query()
 	opts := LogQueryOptions{
-		AgentID:   agent.ID,
-		AgentSlug: agent.Slug,
-		GroveID:   agent.GroveID,
-		LogID:     logging.MessageLogID,
-		Since:     agent.Created,
+		AgentID: agent.ID,
+		GroveID: agent.GroveID,
+		LogID:   logging.MessageLogID,
 	}
 
 	if v := query.Get("tail"); v != "" {
@@ -314,9 +312,7 @@ func (s *Server) handleAgentMessageLogs(w http.ResponseWriter, r *http.Request, 
 	}
 	if v := query.Get("since"); v != "" {
 		if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
-			if t.After(opts.Since) {
-				opts.Since = t
-			}
+			opts.Since = t
 		}
 	}
 	if v := query.Get("until"); v != "" {
@@ -374,11 +370,9 @@ func (s *Server) handleAgentMessageLogsStream(w http.ResponseWriter, r *http.Req
 	}
 
 	opts := LogQueryOptions{
-		AgentID:   agent.ID,
-		AgentSlug: agent.Slug,
-		GroveID:   agent.GroveID,
-		LogID:     logging.MessageLogID,
-		Since:     agent.Created,
+		AgentID: agent.ID,
+		GroveID: agent.GroveID,
+		LogID:   logging.MessageLogID,
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")

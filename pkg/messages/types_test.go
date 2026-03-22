@@ -177,7 +177,9 @@ func TestLogAttrs(t *testing.T) {
 	m := &StructuredMessage{
 		Version:     Version,
 		Sender:      "user:alice",
+		SenderID:    "user-uuid-123",
 		Recipient:   "agent:dev",
+		RecipientID: "agent-uuid-456",
 		Msg:         "hello",
 		Type:        TypeInstruction,
 		Urgent:      true,
@@ -187,15 +189,17 @@ func TestLogAttrs(t *testing.T) {
 
 	attrs := m.LogAttrs()
 
-	// Should contain 7 key-value pairs (14 elements)
-	if len(attrs) != 14 {
-		t.Fatalf("LogAttrs() returned %d elements, want 14", len(attrs))
+	// Should contain 9 key-value pairs (18 elements) when IDs are set
+	if len(attrs) != 18 {
+		t.Fatalf("LogAttrs() returned %d elements, want 18", len(attrs))
 	}
 
 	// Verify key-value pairs
 	expected := map[string]any{
 		"sender":          "user:alice",
+		"sender_id":       "user-uuid-123",
 		"recipient":       "agent:dev",
+		"recipient_id":    "agent-uuid-456",
 		"msg_type":        TypeInstruction,
 		"message_content": "hello",
 		"urgent":          true,
@@ -215,6 +219,31 @@ func TestLogAttrs(t *testing.T) {
 		}
 		if attrs[i+1] != want {
 			t.Errorf("LogAttrs()[%q] = %v, want %v", key, attrs[i+1], want)
+		}
+	}
+}
+
+func TestLogAttrsWithoutIDs(t *testing.T) {
+	m := &StructuredMessage{
+		Version:   Version,
+		Sender:    "user:alice",
+		Recipient: "agent:dev",
+		Msg:       "hello",
+		Type:      TypeInstruction,
+	}
+
+	attrs := m.LogAttrs()
+
+	// Without IDs, should contain 7 key-value pairs (14 elements)
+	if len(attrs) != 14 {
+		t.Fatalf("LogAttrs() returned %d elements, want 14", len(attrs))
+	}
+
+	// Verify sender_id and recipient_id are not present
+	for i := 0; i < len(attrs); i += 2 {
+		key := attrs[i].(string)
+		if key == "sender_id" || key == "recipient_id" {
+			t.Errorf("LogAttrs() should not include %q when empty", key)
 		}
 	}
 }

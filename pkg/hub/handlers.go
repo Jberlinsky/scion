@@ -1799,7 +1799,9 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, id s
 		// Build a structured message from the plain text so that downstream
 		// logging and the broker receive a fully-populated payload.
 		sender := "user:unknown"
+		senderID := ""
 		if user := GetUserIdentityFromContext(ctx); user != nil {
+			senderID = user.ID()
 			if name := user.DisplayName(); name != "" {
 				sender = "user:" + name
 			} else if email := user.Email(); email != "" {
@@ -1807,6 +1809,7 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, id s
 			}
 		}
 		structuredMsg = messages.NewInstruction(sender, "agent:"+id, plainMessage)
+		structuredMsg.SenderID = senderID
 	} else {
 		ValidationError(w, "message or structured_message is required", nil)
 		return
@@ -1817,6 +1820,9 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, id s
 		writeErrorFromErr(w, err, "")
 		return
 	}
+
+	// Populate recipient ID from the resolved agent.
+	structuredMsg.RecipientID = agent.ID
 
 	if !s.checkBrokerAvailability(w, r, agent) {
 		return
@@ -1959,6 +1965,7 @@ func (s *Server) broadcastDirect(w http.ResponseWriter, r *http.Request, groveID
 		}
 		agentMsg := *msg
 		agentMsg.Recipient = "agent:" + agent.Slug
+		agentMsg.RecipientID = agent.ID
 		if err := dispatcher.DispatchAgentMessage(ctx, &agent, agentMsg.Msg, interrupt, &agentMsg); err != nil {
 			s.messageLog.Error("Failed to deliver broadcast message to agent",
 				"agent_id", agent.ID,

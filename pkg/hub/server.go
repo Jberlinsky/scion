@@ -1204,7 +1204,9 @@ func (s *Server) messageEventHandler() EventHandler {
 		}
 
 		// Reconstruct structured message from payload to preserve traits like Plain.
-		structuredMsg := messages.NewInstruction("scheduler", agent.Name, payload.Message)
+		structuredMsg := messages.NewInstruction("scheduler", "agent:"+agent.Slug, payload.Message)
+		structuredMsg.SenderID = "SCHEDULER"
+		structuredMsg.RecipientID = agent.ID
 		structuredMsg.Plain = payload.Plain
 		structuredMsg.Urgent = payload.Interrupt
 

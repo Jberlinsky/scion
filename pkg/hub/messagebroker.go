@@ -307,6 +307,7 @@ func (p *MessageBrokerProxy) fanOutToGrove(ctx context.Context, groveID string, 
 		}
 		agentMsg := *msg // copy to set per-agent recipient
 		agentMsg.Recipient = "agent:" + agent.Slug
+		agentMsg.RecipientID = agent.ID
 		p.deliverToAgent(ctx, groveID, agent.Slug, &agentMsg)
 	}
 }
@@ -329,6 +330,7 @@ func (p *MessageBrokerProxy) fanOutGlobal(ctx context.Context, msg *messages.Str
 		}
 		agentMsg := *msg
 		agentMsg.Recipient = "agent:" + agent.Slug
+		agentMsg.RecipientID = agent.ID
 		p.deliverToAgent(ctx, agent.GroveID, agent.Slug, &agentMsg)
 	}
 }

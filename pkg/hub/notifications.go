@@ -284,14 +284,14 @@ func (nd *NotificationDispatcher) storeAndDispatch(ctx context.Context, sub *sto
 
 	switch sub.SubscriberType {
 	case store.SubscriberTypeAgent:
-		nd.dispatchToAgent(ctx, sub, notif, agent.Slug)
+		nd.dispatchToAgent(ctx, sub, notif, agent.ID, agent.Slug)
 	case store.SubscriberTypeUser:
 		nd.events.PublishNotification(ctx, notif)
 		nd.log.Info("Notification dispatched to user via SSE",
 			"subscriberID", sub.SubscriberID, "notificationID", notif.ID)
 
 		// Dispatch to external notification channels (fire-and-forget)
-		nd.dispatchToChannels(ctx, sub, notif, agent.Slug)
+		nd.dispatchToChannels(ctx, sub, notif, agent.ID, agent.Slug)
 	default:
 		nd.log.Warn("Unknown subscriber type", "type", sub.SubscriberType)
 	}
@@ -300,7 +300,7 @@ func (nd *NotificationDispatcher) storeAndDispatch(ctx context.Context, sub *sto
 // dispatchToAgent sends a notification message to a subscriber agent as a
 // structured message. The sender is the watched agent (agent:<slug>), and
 // the type is state-change or input-needed based on the notification status.
-func (nd *NotificationDispatcher) dispatchToAgent(ctx context.Context, sub *store.NotificationSubscription, notif *store.Notification, watchedSlug string) {
+func (nd *NotificationDispatcher) dispatchToAgent(ctx context.Context, sub *store.NotificationSubscription, notif *store.Notification, watchedAgentID, watchedSlug string) {
 	subscriber, err := nd.store.GetAgentBySlug(ctx, sub.GroveID, sub.SubscriberID)
 	if err != nil {
 		nd.log.Warn("Subscriber agent not found, skipping dispatch",
@@ -336,6 +336,8 @@ func (nd *NotificationDispatcher) dispatchToAgent(ctx context.Context, sub *stor
 		notif.Message,
 		msgType,
 	)
+	structuredMsg.SenderID = watchedAgentID
+	structuredMsg.RecipientID = subscriber.ID
 
 	if err := dispatcher.DispatchAgentMessage(ctx, subscriber, notif.Message, false, structuredMsg); err != nil {
 		nd.log.Error("Failed to dispatch notification to agent",
@@ -373,7 +375,7 @@ func notificationMessageType(status string) string {
 // dispatchToChannels sends a notification to all configured external notification
 // channels. This is fire-and-forget; errors are logged but do not affect the
 // notification pipeline.
-func (nd *NotificationDispatcher) dispatchToChannels(ctx context.Context, sub *store.NotificationSubscription, notif *store.Notification, watchedSlug string) {
+func (nd *NotificationDispatcher) dispatchToChannels(ctx context.Context, sub *store.NotificationSubscription, notif *store.Notification, watchedAgentID, watchedSlug string) {
 	if nd.channelRegistry == nil || nd.channelRegistry.Len() == 0 {
 		return
 	}
@@ -385,6 +387,8 @@ func (nd *NotificationDispatcher) dispatchToChannels(ctx context.Context, sub *s
 		notif.Message,
 		msgType,
 	)
+	structuredMsg.SenderID = watchedAgentID
+	structuredMsg.RecipientID = sub.SubscriberID
 
 	nd.channelRegistry.Dispatch(ctx, structuredMsg)
 }
