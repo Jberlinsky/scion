@@ -137,7 +137,7 @@ default_runtime: ${DEFAULT_RUNTIME}
 server:
   mode: production
 telemetry:
-  enabled: false
+  enabled: true
   cloud:
     enabled: true
     provider: "gcp"
