@@ -111,7 +111,7 @@ func TestParseLogFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := ParseLogFile(logPath)
+	result, err := ParseLogFile(logPath, "")
 	if err != nil {
 		t.Fatalf("ParseLogFile failed: %v", err)
 	}
@@ -460,6 +460,143 @@ func TestAgentCreatedFromServerLog(t *testing.T) {
 	}
 	if agents[0].Name != "poet-red" {
 		t.Errorf("expected agent name 'poet-red' from server log, got %q", agents[0].Name)
+	}
+}
+
+func TestParseFSLog(t *testing.T) {
+	// Create a test NDJSON fs-watcher log
+	fsLogLines := `{"ts":"2026-03-22T16:30:02.000Z","agent_id":"frontend","action":"modify","path":"web/src/App.tsx","size":4096}
+{"ts":"2026-03-22T16:30:03.500Z","agent_id":"backend","action":"create","path":"pkg/api/handler.go","size":1523}
+{"ts":"2026-03-22T16:30:05.200Z","agent_id":"frontend","action":"delete","path":"web/src/old-util.ts"}
+{"ts":"2026-03-22T16:30:06.000Z","agent_id":"backend","action":"rename_to","path":"pkg/api/routes.go","size":800}
+{"ts":"2026-03-22T16:30:06.000Z","agent_id":"backend","action":"rename_from","path":"pkg/api/old-routes.go"}
+`
+	tmpDir := t.TempDir()
+	fsLogPath := filepath.Join(tmpDir, "fs-events.ndjson")
+	if err := os.WriteFile(fsLogPath, []byte(fsLogLines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := parseFSLog(fsLogPath)
+	if err != nil {
+		t.Fatalf("parseFSLog failed: %v", err)
+	}
+
+	if len(events) != 5 {
+		t.Fatalf("expected 5 events, got %d", len(events))
+	}
+
+	// Verify first event: modify -> edit
+	fe0 := events[0].Data.(FileEditEvent)
+	if fe0.AgentID != "frontend" || fe0.Action != "edit" || fe0.FilePath != "web/src/App.tsx" {
+		t.Errorf("event 0: got %+v", fe0)
+	}
+
+	// Verify create
+	fe1 := events[1].Data.(FileEditEvent)
+	if fe1.Action != "create" {
+		t.Errorf("event 1: expected action 'create', got %q", fe1.Action)
+	}
+
+	// Verify delete
+	fe2 := events[2].Data.(FileEditEvent)
+	if fe2.Action != "delete" {
+		t.Errorf("event 2: expected action 'delete', got %q", fe2.Action)
+	}
+
+	// Verify rename_to -> create
+	fe3 := events[3].Data.(FileEditEvent)
+	if fe3.Action != "create" {
+		t.Errorf("event 3: expected action 'create' for rename_to, got %q", fe3.Action)
+	}
+
+	// Verify rename_from -> delete
+	fe4 := events[4].Data.(FileEditEvent)
+	if fe4.Action != "delete" {
+		t.Errorf("event 4: expected action 'delete' for rename_from, got %q", fe4.Action)
+	}
+
+	// All events should be file_edit type
+	for i, e := range events {
+		if e.Type != "file_edit" {
+			t.Errorf("event %d: expected type 'file_edit', got %q", i, e.Type)
+		}
+	}
+}
+
+func TestParseLogFileWithFSLog(t *testing.T) {
+	// Primary log with a tool call that produces a file_edit
+	entries := []GCPLogEntry{
+		{
+			InsertID:  "1",
+			Timestamp: "2026-03-22T16:30:00.000Z",
+			LogName:   "projects/test/logs/scion-agents",
+			Labels:    map[string]string{"agent_id": "agent-1", "scion.harness": "claude"},
+			JSONPayload: map[string]any{
+				"message":   "agent.tool.call",
+				"tool_name": "Write",
+				"file_path": "/workspace/main.go",
+			},
+		},
+		{
+			InsertID:  "2",
+			Timestamp: "2026-03-22T16:30:01.000Z",
+			LogName:   "projects/test/logs/scion-agents",
+			Labels:    map[string]string{"agent_id": "agent-1", "scion.harness": "claude"},
+			JSONPayload: map[string]any{
+				"message": "agent.turn.end",
+			},
+		},
+	}
+	data, _ := json.Marshal(entries)
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "logs.json")
+	os.WriteFile(logPath, data, 0o644)
+
+	// FS log with different file events
+	fsLogLines := `{"ts":"2026-03-22T16:30:00.500Z","agent_id":"agent-1","action":"modify","path":"main.go","size":2048}
+`
+	fsLogPath := filepath.Join(tmpDir, "fs.ndjson")
+	os.WriteFile(fsLogPath, []byte(fsLogLines), 0o644)
+
+	// Parse with fs-log: file events from primary log should be suppressed
+	result, err := ParseLogFile(logPath, fsLogPath)
+	if err != nil {
+		t.Fatalf("ParseLogFile with fs-log failed: %v", err)
+	}
+
+	fileEditCount := 0
+	for _, e := range result.Events {
+		if e.Type == "file_edit" {
+			fileEditCount++
+			fe := e.Data.(FileEditEvent)
+			// Should be from fs-log, not from tool call
+			if fe.FilePath != "main.go" {
+				t.Errorf("unexpected file_edit path: %q", fe.FilePath)
+			}
+			if fe.Action != "edit" {
+				t.Errorf("expected action 'edit' from fs-log modify, got %q", fe.Action)
+			}
+		}
+	}
+	if fileEditCount != 1 {
+		t.Errorf("expected exactly 1 file_edit (from fs-log), got %d", fileEditCount)
+	}
+
+	// Parse without fs-log: should have tool-based file event
+	resultNoFS, err := ParseLogFile(logPath, "")
+	if err != nil {
+		t.Fatalf("ParseLogFile without fs-log failed: %v", err)
+	}
+
+	fileEditCount = 0
+	for _, e := range resultNoFS.Events {
+		if e.Type == "file_edit" {
+			fileEditCount++
+		}
+	}
+	if fileEditCount != 1 {
+		t.Errorf("expected 1 file_edit from tool calls, got %d", fileEditCount)
 	}
 }
 

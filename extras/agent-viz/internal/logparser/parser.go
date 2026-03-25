@@ -1,6 +1,7 @@
 package logparser
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -115,8 +116,19 @@ type ParseResult struct {
 	Events   []PlaybackEvent
 }
 
+// fsWatcherEvent mirrors the NDJSON output of the fs-watcher-tool.
+type fsWatcherEvent struct {
+	Timestamp time.Time `json:"ts"`
+	AgentID   string    `json:"agent_id"`
+	Action    string    `json:"action"`
+	Path      string    `json:"path"`
+	Size      *int64    `json:"size,omitempty"`
+}
+
 // ParseLogFile reads a GCP log JSON export and returns the manifest and events.
-func ParseLogFile(path string) (*ParseResult, error) {
+// If fsLogPath is non-empty, filesystem events are sourced from that NDJSON log
+// instead of from tool calls in the primary log.
+func ParseLogFile(path string, fsLogPath string) (*ParseResult, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading log file: %w", err)
@@ -132,9 +144,33 @@ func ParseLogFile(path string) (*ParseResult, error) {
 		return entries[i].Timestamp < entries[j].Timestamp
 	})
 
+	useFSLog := fsLogPath != ""
+
 	agents := extractAgents(entries)
-	events := extractEvents(entries, agents)
+	events := extractEventsOpt(entries, agents, useFSLog)
 	timeRange := extractTimeRange(entries)
+
+	if useFSLog {
+		fsEvents, err := parseFSLog(fsLogPath)
+		if err != nil {
+			return nil, fmt.Errorf("parsing fs log: %w", err)
+		}
+		events = append(events, fsEvents...)
+		// Extend time range to cover fs log events
+		if len(fsEvents) > 0 {
+			if fsEvents[0].Timestamp < timeRange.Start || timeRange.Start == "" {
+				timeRange.Start = fsEvents[0].Timestamp
+			}
+			last := fsEvents[len(fsEvents)-1].Timestamp
+			if last > timeRange.End || timeRange.End == "" {
+				timeRange.End = last
+			}
+		}
+		// Re-sort after merging
+		sort.Slice(events, func(i, j int) bool {
+			return events[i].Timestamp < events[j].Timestamp
+		})
+	}
 
 	// Determine grove info
 	groveID, groveName := extractGroveInfo(entries)
@@ -152,6 +188,69 @@ func ParseLogFile(path string) (*ParseResult, error) {
 		Manifest: manifest,
 		Events:   events,
 	}, nil
+}
+
+// parseFSLog reads a fs-watcher NDJSON log and converts events to PlaybackEvents.
+func parseFSLog(path string) ([]PlaybackEvent, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("opening fs log: %w", err)
+	}
+	defer f.Close()
+
+	var events []PlaybackEvent
+	scanner := bufio.NewScanner(f)
+	// Increase buffer for potentially long lines
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var fsEvt fsWatcherEvent
+		if err := json.Unmarshal(line, &fsEvt); err != nil {
+			continue // skip malformed lines
+		}
+		ts := fsEvt.Timestamp.UTC().Format(time.RFC3339Nano)
+		action := mapFSAction(fsEvt.Action)
+		eventType := "file_edit"
+		if action == "delete" {
+			eventType = "file_edit"
+		}
+		events = append(events, PlaybackEvent{
+			Type:      eventType,
+			Timestamp: ts,
+			Data: FileEditEvent{
+				AgentID:  fsEvt.AgentID,
+				FilePath: fsEvt.Path,
+				Action:   action,
+			},
+		})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("reading fs log: %w", err)
+	}
+
+	return events, nil
+}
+
+// mapFSAction maps fs-watcher action strings to agent-viz file event actions.
+func mapFSAction(action string) string {
+	switch action {
+	case "create":
+		return "create"
+	case "modify":
+		return "edit"
+	case "delete":
+		return "delete"
+	case "rename_to":
+		return "create"
+	case "rename_from":
+		return "delete"
+	default:
+		return "edit"
+	}
 }
 
 func extractTimeRange(entries []GCPLogEntry) TimeRange {
@@ -399,6 +498,13 @@ func addFileToTree(nodes map[string]*FileNode, fp string) {
 }
 
 func extractEvents(entries []GCPLogEntry, agents []AgentInfo) []PlaybackEvent {
+	return extractEventsOpt(entries, agents, false)
+}
+
+// extractEventsOpt extracts events from log entries. When skipFileEvents is true,
+// file_edit and file_read events from tool calls are suppressed (used when an
+// external fs-watcher log provides file events instead).
+func extractEventsOpt(entries []GCPLogEntry, agents []AgentInfo, skipFileEvents bool) []PlaybackEvent {
 	var events []PlaybackEvent
 
 	agentNameByID := make(map[string]string)
@@ -504,32 +610,35 @@ func extractEvents(entries []GCPLogEntry, agents []AgentInfo) []PlaybackEvent {
 					},
 				})
 				// Generate file events for tools that interact with files
-				fp := extractFilePath(jp)
-				if fp != "" {
-					if isFileEditTool(toolName) {
-						action := "edit"
-						if toolName == "write_file" || toolName == "create_file" || toolName == "Write" {
-							action = "create"
+				// (suppressed when fs-watcher log provides file events)
+				if !skipFileEvents {
+					fp := extractFilePath(jp)
+					if fp != "" {
+						if isFileEditTool(toolName) {
+							action := "edit"
+							if toolName == "write_file" || toolName == "create_file" || toolName == "Write" {
+								action = "create"
+							}
+							events = append(events, PlaybackEvent{
+								Type:      "file_edit",
+								Timestamp: ts,
+								Data: FileEditEvent{
+									AgentID:  aid,
+									FilePath: fp,
+									Action:   action,
+								},
+							})
+						} else if isFileReadTool(toolName) {
+							events = append(events, PlaybackEvent{
+								Type:      "file_read",
+								Timestamp: ts,
+								Data: FileEditEvent{
+									AgentID:  aid,
+									FilePath: fp,
+									Action:   "read",
+								},
+							})
 						}
-						events = append(events, PlaybackEvent{
-							Type:      "file_edit",
-							Timestamp: ts,
-							Data: FileEditEvent{
-								AgentID:  aid,
-								FilePath: fp,
-								Action:   action,
-							},
-						})
-					} else if isFileReadTool(toolName) {
-						events = append(events, PlaybackEvent{
-							Type:      "file_read",
-							Timestamp: ts,
-							Data: FileEditEvent{
-								AgentID:  aid,
-								FilePath: fp,
-								Action:   "read",
-							},
-						})
 					}
 				}
 			case "agent.tool.result":

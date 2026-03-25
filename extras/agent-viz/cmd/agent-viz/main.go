@@ -15,19 +15,20 @@ import (
 
 func main() {
 	logFile := flag.String("log-file", "", "Path to GCP log JSON export file")
+	fsLog := flag.String("fs-log", "", "Path to fs-watcher NDJSON log (replaces file events from primary log)")
 	port := flag.Int("port", 8080, "Port to serve on")
 	devMode := flag.Bool("dev", false, "Serve web assets from disk (development mode)")
 	noBrowser := flag.Bool("no-browser", false, "Don't open browser automatically")
 	flag.Parse()
 
 	if *logFile == "" {
-		fmt.Fprintln(os.Stderr, "Usage: agent-viz --log-file /path/to/logs.json [--port 8080]")
+		fmt.Fprintln(os.Stderr, "Usage: agent-viz --log-file /path/to/logs.json [--fs-log /path/to/fs.ndjson] [--port 8080]")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
 	log.Printf("Parsing log file: %s", *logFile)
-	result, err := logparser.ParseLogFile(*logFile)
+	result, err := logparser.ParseLogFile(*logFile, *fsLog)
 	if err != nil {
 		log.Fatalf("Error parsing log file: %v", err)
 	}
