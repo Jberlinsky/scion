@@ -31,8 +31,9 @@ import (
 )
 
 type PodmanRuntime struct {
-	Command string
-	Host    string
+	Command  string
+	Host     string
+	Rootless bool // true when Podman is running in rootless mode
 }
 
 // NewPodmanRuntime creates a new PodmanRuntime after verifying that the podman
@@ -63,11 +64,12 @@ func NewPodmanRuntime() Runtime {
 		return &ErrorRuntime{Err: fmt.Errorf("podman version %s is below the minimum supported version 4.x", version)}
 	}
 
-	// Log rootless mode at debug level
-	detectRootlessMode(command)
+	// Detect and store rootless mode
+	rootless := detectRootlessMode(command)
 
 	return &PodmanRuntime{
-		Command: command,
+		Command:  command,
+		Rootless: rootless,
 	}
 }
 
@@ -90,20 +92,33 @@ func parseMajorVersion(version string) (int, error) {
 	return strconv.Atoi(parts[0])
 }
 
-// detectRootlessMode checks whether Podman is running in rootless mode and logs
-// the result at debug level.
-func detectRootlessMode(command string) {
+// detectRootlessMode checks whether Podman is running in rootless mode.
+// Returns true when rootless, false otherwise.
+func detectRootlessMode(command string) bool {
 	out, err := exec.Command(command, "info", "--format", "{{.Host.Security.Rootless}}").Output()
 	if err != nil {
 		util.Debugf("podman: failed to detect rootless mode: %v", err)
-		return
+		return false
 	}
 	rootless := strings.TrimSpace(string(out))
 	util.Debugf("podman: rootless mode = %s", rootless)
+	return rootless == "true"
 }
 
 func (r *PodmanRuntime) Name() string {
 	return "podman"
+}
+
+// execUser returns the user to pass to podman exec. In rootless mode, the
+// child process runs as root (UID 0) inside the container because the host
+// user's UID is mapped to container UID 0 and privilege drop is skipped.
+// Exec must match that UID so it can find the tmux session and access the
+// same files.
+func (r *PodmanRuntime) execUser() string {
+	if r.Rootless {
+		return "root"
+	}
+	return "scion"
 }
 
 func (r *PodmanRuntime) Run(ctx context.Context, config RunConfig) (string, error) {
@@ -300,7 +315,7 @@ func (r *PodmanRuntime) Attach(ctx context.Context, id string) error {
 		return fmt.Errorf("agent '%s' is not running (status: %s). Use 'scion start %s' to resume it.", id, agent.ContainerStatus, id)
 	}
 
-	return runInteractiveCommand(r.Command, "exec", "-it", "--user", "scion", agent.ContainerID, "tmux", "attach", "-t", "scion")
+	return runInteractiveCommand(r.Command, "exec", "-it", "--user", r.execUser(), agent.ContainerID, "tmux", "attach", "-t", "scion")
 }
 
 func (r *PodmanRuntime) ImageExists(ctx context.Context, image string) (bool, error) {
@@ -374,7 +389,7 @@ func (r *PodmanRuntime) Sync(ctx context.Context, id string, direction SyncDirec
 }
 
 func (r *PodmanRuntime) Exec(ctx context.Context, id string, cmd []string) (string, error) {
-	args := append([]string{"exec", "--user", "scion", id}, cmd...)
+	args := append([]string{"exec", "--user", r.execUser(), id}, cmd...)
 	return runSimpleCommand(ctx, r.Command, args...)
 }
 

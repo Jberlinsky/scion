@@ -75,18 +75,56 @@ echo "$@"
 		t.Fatalf("failed to write mock podman: %v", err)
 	}
 
-	rt := &PodmanRuntime{
-		Command: mockPodman,
-	}
+	t.Run("rootful uses scion user", func(t *testing.T) {
+		rt := &PodmanRuntime{
+			Command:  mockPodman,
+			Rootless: false,
+		}
 
-	out, err := rt.Exec(context.Background(), "test-container", []string{"whoami"})
-	if err != nil {
-		t.Fatalf("runtime.Exec failed: %v", err)
-	}
+		out, err := rt.Exec(context.Background(), "test-container", []string{"whoami"})
+		if err != nil {
+			t.Fatalf("runtime.Exec failed: %v", err)
+		}
 
-	if !strings.Contains(out, "--user scion") {
-		t.Errorf("expected '--user scion' in exec output, got %q", out)
-	}
+		if !strings.Contains(out, "--user scion") {
+			t.Errorf("expected '--user scion' in exec output, got %q", out)
+		}
+	})
+
+	t.Run("rootless uses root user", func(t *testing.T) {
+		rt := &PodmanRuntime{
+			Command:  mockPodman,
+			Rootless: true,
+		}
+
+		out, err := rt.Exec(context.Background(), "test-container", []string{"whoami"})
+		if err != nil {
+			t.Fatalf("runtime.Exec failed: %v", err)
+		}
+
+		if !strings.Contains(out, "--user root") {
+			t.Errorf("expected '--user root' in exec output, got %q", out)
+		}
+		if strings.Contains(out, "--user scion") {
+			t.Errorf("should not contain '--user scion' in rootless mode, got %q", out)
+		}
+	})
+}
+
+func TestPodmanRuntime_ExecUser(t *testing.T) {
+	t.Run("rootful returns scion", func(t *testing.T) {
+		rt := &PodmanRuntime{Rootless: false}
+		if got := rt.execUser(); got != "scion" {
+			t.Errorf("expected 'scion', got %q", got)
+		}
+	})
+
+	t.Run("rootless returns root", func(t *testing.T) {
+		rt := &PodmanRuntime{Rootless: true}
+		if got := rt.execUser(); got != "root" {
+			t.Errorf("expected 'root', got %q", got)
+		}
+	})
 }
 
 func TestPodmanRuntime_List_JSONArray(t *testing.T) {
