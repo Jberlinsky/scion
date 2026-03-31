@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/GoogleCloudPlatform/scion/pkg/secret"
@@ -136,6 +138,174 @@ func (e *SecretMigrationExecutor) Run(ctx context.Context, logger io.Writer, par
 func (r *SecretMigrationResult) ResultJSON() string {
 	b, _ := json.Marshal(r)
 	return string(b)
+}
+
+// PullImagesExecutor pulls container images for configured harnesses.
+type PullImagesExecutor struct {
+	runtimeBin string   // "docker", "podman", or "container"
+	registry   string   // image registry prefix
+	tag        string   // image tag (default "latest")
+	harnesses  []string // harness names (e.g., "claude", "gemini")
+}
+
+func (e *PullImagesExecutor) Run(ctx context.Context, logger io.Writer, params map[string]string) error {
+	registry := e.registry
+	if v := params["registry"]; v != "" {
+		registry = v
+	}
+	tag := e.tag
+	if tag == "" {
+		tag = "latest"
+	}
+	if v := params["tag"]; v != "" {
+		tag = v
+	}
+
+	if registry == "" {
+		return fmt.Errorf("no image registry configured; set runtime.image_registry in settings.yaml")
+	}
+
+	runtimeBin := e.runtimeBin
+	if runtimeBin == "" {
+		runtimeBin = detectContainerRuntime()
+	}
+	if runtimeBin == "" {
+		return fmt.Errorf("no container runtime found (tried docker, podman)")
+	}
+
+	harnesses := e.harnesses
+	if len(harnesses) == 0 {
+		harnesses = []string{"claude", "gemini"}
+	}
+
+	fmt.Fprintf(logger, "Using runtime: %s\n", runtimeBin)
+	fmt.Fprintf(logger, "Registry: %s, Tag: %s\n", registry, tag)
+	fmt.Fprintf(logger, "Pulling %d image(s)...\n\n", len(harnesses))
+
+	pulled := 0
+	var lastErr error
+	for _, h := range harnesses {
+		image := fmt.Sprintf("%s/scion-%s:%s", registry, h, tag)
+		fmt.Fprintf(logger, "Pulling %s ...\n", image)
+
+		cmd := exec.CommandContext(ctx, runtimeBin, "image", "pull", image)
+		cmd.Stdout = logger
+		cmd.Stderr = logger
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(logger, "  ERROR: %v\n\n", err)
+			lastErr = err
+			continue
+		}
+		fmt.Fprintf(logger, "  OK\n\n")
+		pulled++
+	}
+
+	fmt.Fprintf(logger, "Pull complete: %d/%d succeeded\n", pulled, len(harnesses))
+	if lastErr != nil && pulled == 0 {
+		return fmt.Errorf("all image pulls failed; last error: %w", lastErr)
+	}
+	return nil
+}
+
+// detectContainerRuntime finds an available container CLI on the system.
+func detectContainerRuntime() string {
+	for _, bin := range []string{"docker", "podman"} {
+		if p, err := exec.LookPath(bin); err == nil && p != "" {
+			return bin
+		}
+	}
+	return ""
+}
+
+// RebuildServerExecutor rebuilds the server binary from git and restarts via systemd.
+type RebuildServerExecutor struct {
+	repoPath    string // path to scion source checkout
+	binaryDest  string // install path (e.g., /usr/local/bin/scion)
+	serviceName string // systemd service name (e.g., "scion-hub")
+}
+
+func (e *RebuildServerExecutor) Run(ctx context.Context, logger io.Writer, params map[string]string) error {
+	if runtime.GOOS != "linux" {
+		return fmt.Errorf("rebuild-server is only supported on Linux (requires systemd); restart the server manually on %s", runtime.GOOS)
+	}
+
+	repoPath := e.repoPath
+	if repoPath == "" {
+		return fmt.Errorf("no repository path configured for rebuild-server")
+	}
+	binaryDest := e.binaryDest
+	if binaryDest == "" {
+		binaryDest = "/usr/local/bin/scion"
+	}
+	serviceName := e.serviceName
+	if serviceName == "" {
+		serviceName = "scion-hub"
+	}
+
+	steps := []struct {
+		name string
+		cmd  string
+		args []string
+		dir  string
+	}{
+		{"Pulling latest code", "git", []string{"pull"}, repoPath},
+		{"Building web assets", "make", []string{"web"}, repoPath},
+		{"Building server binary", "go", []string{"build", "-o", binaryDest, "./cmd/scion"}, repoPath},
+		{"Restarting service", "systemctl", []string{"restart", serviceName}, ""},
+	}
+
+	for _, step := range steps {
+		fmt.Fprintf(logger, "==> %s\n", step.name)
+		cmd := exec.CommandContext(ctx, step.cmd, step.args...)
+		if step.dir != "" {
+			cmd.Dir = step.dir
+		}
+		cmd.Stdout = logger
+		cmd.Stderr = logger
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("%s failed: %w", step.name, err)
+		}
+		fmt.Fprintln(logger)
+	}
+
+	fmt.Fprintln(logger, "Server rebuild and restart complete.")
+	return nil
+}
+
+// RebuildWebExecutor rebuilds the web frontend assets from source.
+type RebuildWebExecutor struct {
+	repoPath string // path to scion source checkout
+}
+
+func (e *RebuildWebExecutor) Run(ctx context.Context, logger io.Writer, params map[string]string) error {
+	repoPath := e.repoPath
+	if repoPath == "" {
+		return fmt.Errorf("no repository path configured for rebuild-web")
+	}
+
+	steps := []struct {
+		name string
+		cmd  string
+		args []string
+	}{
+		{"Pulling latest code", "git", []string{"pull"}},
+		{"Building web assets", "make", []string{"web"}},
+	}
+
+	for _, step := range steps {
+		fmt.Fprintf(logger, "==> %s\n", step.name)
+		cmd := exec.CommandContext(ctx, step.cmd, step.args...)
+		cmd.Dir = repoPath
+		cmd.Stdout = logger
+		cmd.Stderr = logger
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("%s failed: %w", step.name, err)
+		}
+		fmt.Fprintln(logger)
+	}
+
+	fmt.Fprintln(logger, "Web frontend rebuild complete. Changes take effect on the next page load.")
+	return nil
 }
 
 // parseMigrationParams extracts and validates migration-specific parameters from the request body.

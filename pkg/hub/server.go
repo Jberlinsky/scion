@@ -116,6 +116,26 @@ type ServerConfig struct {
 	// HubID is the unique hub instance ID used for secret namespacing.
 	// If empty, secrets are looked up/stored with an empty scope ID.
 	HubID string
+	// MaintenanceConfig holds configuration for routine maintenance operations.
+	MaintenanceConfig MaintenanceConfig
+}
+
+// MaintenanceConfig holds configuration for routine maintenance operation executors.
+type MaintenanceConfig struct {
+	// ImageRegistry is the container image registry prefix (e.g., "ghcr.io/myorg").
+	ImageRegistry string
+	// ImageTag is the default image tag to pull (default: "latest").
+	ImageTag string
+	// Harnesses is the list of harness names whose images should be pulled (e.g., ["claude", "gemini"]).
+	Harnesses []string
+	// RuntimeBin overrides auto-detection of the container runtime binary (docker, podman).
+	RuntimeBin string
+	// RepoPath is the path to the scion source checkout for rebuild operations.
+	RepoPath string
+	// BinaryDest is the install path for the rebuilt binary (default: /usr/local/bin/scion).
+	BinaryDest string
+	// ServiceName is the systemd service name to restart (default: "scion-hub").
+	ServiceName string
 }
 
 // GitHubAppServerConfig holds the GitHub App configuration for the Hub server.

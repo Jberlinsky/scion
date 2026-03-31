@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GoogleCloudPlatform/scion/pkg/api"
 	"github.com/GoogleCloudPlatform/scion/pkg/store"
 )
 
@@ -34,22 +35,54 @@ func (s *Server) handleAdminMaintenanceOps(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if r.Method != http.MethodGet {
-		MethodNotAllowed(w)
-		return
-	}
-
-	// Extract sub-path: /api/v1/admin/maintenance/operations/{key}
+	// Extract sub-path: /api/v1/admin/maintenance/operations/{key}[/run|/runs|/runs/{runId}]
 	subPath := strings.TrimPrefix(r.URL.Path, "/api/v1/admin/maintenance/operations")
 	subPath = strings.TrimPrefix(subPath, "/")
 
 	if subPath == "" {
+		if r.Method != http.MethodGet {
+			MethodNotAllowed(w)
+			return
+		}
 		s.listMaintenanceOperations(w, r)
 		return
 	}
 
-	// GET /api/v1/admin/maintenance/operations/{key}
-	s.getMaintenanceOperation(w, r, subPath)
+	// Parse: {key}, {key}/run, {key}/runs, {key}/runs/{runId}
+	parts := strings.SplitN(subPath, "/", 3)
+	key := parts[0]
+
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			MethodNotAllowed(w)
+			return
+		}
+		s.getMaintenanceOperation(w, r, key)
+		return
+	}
+
+	action := parts[1]
+
+	switch action {
+	case "run":
+		if r.Method != http.MethodPost {
+			MethodNotAllowed(w)
+			return
+		}
+		s.executeOperation(w, r, key, user)
+	case "runs":
+		if r.Method != http.MethodGet {
+			MethodNotAllowed(w)
+			return
+		}
+		if len(parts) == 3 && parts[2] != "" {
+			s.getOperationRun(w, r, parts[2])
+		} else {
+			s.listOperationRuns(w, r, key)
+		}
+	default:
+		writeError(w, http.StatusNotFound, ErrCodeNotFound, "Not found", nil)
+	}
 }
 
 // handleAdminMaintenanceMigrations handles routes under /api/v1/admin/maintenance/migrations/.
@@ -178,6 +211,7 @@ func (s *Server) executeMigration(w http.ResponseWriter, r *http.Request, key st
 
 // resolveMaintenanceExecutor returns the executor for a given operation key.
 func (s *Server) resolveMaintenanceExecutor(key string) (MaintenanceExecutor, error) {
+	mc := s.config.MaintenanceConfig
 	switch key {
 	case "secret-hub-id-migration":
 		backend := s.GetSecretBackend()
@@ -188,9 +222,160 @@ func (s *Server) resolveMaintenanceExecutor(key string) (MaintenanceExecutor, er
 			store:         s.store,
 			secretBackend: backend,
 		}, nil
+	case "pull-images":
+		return &PullImagesExecutor{
+			runtimeBin: mc.RuntimeBin,
+			registry:   mc.ImageRegistry,
+			tag:        mc.ImageTag,
+			harnesses:  mc.Harnesses,
+		}, nil
+	case "rebuild-server":
+		return &RebuildServerExecutor{
+			repoPath:    mc.RepoPath,
+			binaryDest:  mc.BinaryDest,
+			serviceName: mc.ServiceName,
+		}, nil
+	case "rebuild-web":
+		return &RebuildWebExecutor{
+			repoPath: mc.RepoPath,
+		}, nil
 	default:
-		return nil, fmt.Errorf("no executor registered for migration %q", key)
+		return nil, fmt.Errorf("no executor registered for operation %q", key)
 	}
+}
+
+// executeOperation starts execution of a routine operation by key.
+func (s *Server) executeOperation(w http.ResponseWriter, r *http.Request, key string, user UserIdentity) {
+	ctx := r.Context()
+
+	// Look up the operation.
+	op, err := s.store.GetMaintenanceOperation(ctx, key)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, ErrCodeNotFound, "Operation not found", nil)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrCodeInternalError, "Failed to get operation", nil)
+		return
+	}
+
+	// Verify this is a routine operation, not a migration.
+	if op.Category != store.MaintenanceCategoryOperation {
+		writeError(w, http.StatusBadRequest, ErrCodeInvalidRequest, "This is a migration; use the migrations endpoint", nil)
+		return
+	}
+
+	// Parse request body for params.
+	var body map[string]interface{}
+	if r.Body != nil {
+		defer r.Body.Close()
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	params := parseMigrationParams(body) // reuse same param parser
+
+	// Resolve the executor.
+	executor, err := s.resolveMaintenanceExecutor(key)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrCodeInvalidRequest, err.Error(), nil)
+		return
+	}
+
+	// Create a run record.
+	runID := api.NewUUID()
+	now := time.Now()
+	run := &store.MaintenanceOperationRun{
+		ID:           runID,
+		OperationKey: key,
+		Status:       store.MaintenanceStatusRunning,
+		StartedAt:    now,
+		StartedBy:    user.Email(),
+	}
+	if err := s.store.CreateMaintenanceRun(ctx, run); err != nil {
+		writeError(w, http.StatusInternalServerError, ErrCodeInternalError, "Failed to create run record", nil)
+		return
+	}
+
+	// Execute asynchronously.
+	go func() {
+		var buf bytes.Buffer
+		execErr := executor.Run(context.Background(), &buf, params)
+
+		finishedAt := time.Now()
+		run.CompletedAt = &finishedAt
+		run.Log = buf.String()
+
+		if execErr != nil {
+			run.Status = store.MaintenanceStatusFailed
+			result := map[string]interface{}{
+				"error": execErr.Error(),
+			}
+			resultJSON, _ := json.Marshal(result)
+			run.Result = string(resultJSON)
+		} else {
+			run.Status = store.MaintenanceStatusCompleted
+		}
+
+		_ = s.store.UpdateMaintenanceRun(context.Background(), run)
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"runId":  runID,
+		"status": "running",
+	})
+}
+
+// listOperationRuns returns the run history for a given operation key.
+func (s *Server) listOperationRuns(w http.ResponseWriter, r *http.Request, key string) {
+	// Verify operation exists.
+	if _, err := s.store.GetMaintenanceOperation(r.Context(), key); err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, ErrCodeNotFound, "Operation not found", nil)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrCodeInternalError, "Failed to get operation", nil)
+		return
+	}
+
+	limit := 20
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := fmt.Sscanf(v, "%d", &limit); n != 1 || err != nil || limit < 1 {
+			limit = 20
+		}
+		if limit > 100 {
+			limit = 100
+		}
+	}
+
+	runs, err := s.store.ListMaintenanceRuns(r.Context(), key, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrCodeInternalError, "Failed to list runs", nil)
+		return
+	}
+
+	var resp []maintenanceRunResponse
+	for _, run := range runs {
+		resp = append(resp, toMaintenanceRunResponse(run))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"runs": resp,
+	})
+}
+
+// getOperationRun returns a single run by ID.
+func (s *Server) getOperationRun(w http.ResponseWriter, r *http.Request, runID string) {
+	run, err := s.store.GetMaintenanceRun(r.Context(), runID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, ErrCodeNotFound, "Run not found", nil)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrCodeInternalError, "Failed to get run", nil)
+		return
+	}
+
+	resp := toMaintenanceRunResponse(*run)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // listMaintenanceOperations returns all operations grouped by category.
@@ -266,12 +451,14 @@ type maintenanceOperationWithLastRunResponse struct {
 }
 
 type maintenanceRunResponse struct {
-	ID          string      `json:"id"`
-	Status      string      `json:"status"`
-	StartedAt   interface{} `json:"startedAt"`
-	CompletedAt interface{} `json:"completedAt"`
-	StartedBy   interface{} `json:"startedBy"`
-	Result      interface{} `json:"result"`
+	ID           string      `json:"id"`
+	OperationKey string      `json:"operationKey,omitempty"`
+	Status       string      `json:"status"`
+	StartedAt    interface{} `json:"startedAt"`
+	CompletedAt  interface{} `json:"completedAt"`
+	StartedBy    interface{} `json:"startedBy"`
+	Result       interface{} `json:"result"`
+	Log          interface{} `json:"log,omitempty"`
 }
 
 func toMaintenanceOperationResponse(op store.MaintenanceOperation) maintenanceOperationResponse {
@@ -301,9 +488,10 @@ func toMaintenanceOperationResponse(op store.MaintenanceOperation) maintenanceOp
 
 func toMaintenanceRunResponse(run store.MaintenanceOperationRun) maintenanceRunResponse {
 	resp := maintenanceRunResponse{
-		ID:        run.ID,
-		Status:    run.Status,
-		StartedAt: run.StartedAt,
+		ID:           run.ID,
+		OperationKey: run.OperationKey,
+		Status:       run.Status,
+		StartedAt:    run.StartedAt,
 	}
 	if run.CompletedAt != nil {
 		resp.CompletedAt = run.CompletedAt
@@ -313,6 +501,9 @@ func toMaintenanceRunResponse(run store.MaintenanceOperationRun) maintenanceRunR
 	}
 	if run.Result != "" {
 		resp.Result = run.Result
+	}
+	if run.Log != "" {
+		resp.Log = run.Log
 	}
 	return resp
 }

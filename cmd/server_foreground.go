@@ -668,6 +668,7 @@ func initHubServer(ctx context.Context, cfg *config.GlobalConfig, s store.Store,
 				},
 			},
 		},
+		MaintenanceConfig: resolveMaintenanceConfig(cfg),
 	}
 
 	hubSrv := hub.New(hubCfg, s)
@@ -1181,4 +1182,47 @@ func resolveHubEndpointForBroker(cfg *config.GlobalConfig, hubEndpoint string, s
 		hubEndpointForRH = settings.Hub.Endpoint
 	}
 	return hubEndpointForRH
+}
+
+// resolveMaintenanceConfig builds the maintenance config from versioned settings
+// and environment variables.
+func resolveMaintenanceConfig(cfg *config.GlobalConfig) hub.MaintenanceConfig {
+	mc := hub.MaintenanceConfig{
+		ServiceName: "scion-hub",
+		BinaryDest:  "/usr/local/bin/scion",
+	}
+
+	// Pull from versioned settings if available.
+	if vs, err := config.LoadVersionedSettings(""); err == nil {
+		mc.ImageRegistry = vs.ResolveImageRegistry("")
+		// Collect harness names from configured harness configs.
+		for name := range vs.HarnessConfigs {
+			mc.Harnesses = append(mc.Harnesses, name)
+		}
+		if mc.RepoPath == "" {
+			mc.RepoPath = vs.WorkspacePath
+		}
+	}
+
+	// Environment variable overrides.
+	if v := os.Getenv("SCION_MAINTENANCE_IMAGE_REGISTRY"); v != "" {
+		mc.ImageRegistry = v
+	}
+	if v := os.Getenv("SCION_MAINTENANCE_IMAGE_TAG"); v != "" {
+		mc.ImageTag = v
+	}
+	if v := os.Getenv("SCION_MAINTENANCE_RUNTIME"); v != "" {
+		mc.RuntimeBin = v
+	}
+	if v := os.Getenv("SCION_MAINTENANCE_REPO_PATH"); v != "" {
+		mc.RepoPath = v
+	}
+	if v := os.Getenv("SCION_MAINTENANCE_BINARY_DEST"); v != "" {
+		mc.BinaryDest = v
+	}
+	if v := os.Getenv("SCION_MAINTENANCE_SERVICE_NAME"); v != "" {
+		mc.ServiceName = v
+	}
+
+	return mc
 }

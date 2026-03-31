@@ -20,6 +20,7 @@
  * Displays maintenance operations and migrations with execution support.
  * Phase 1: Read-only display of operations and migration checklist.
  * Phase 2: Migration execution with dry-run support and status polling.
+ * Phase 3: Routine operation execution with run history.
  */
 
 import { LitElement, html, css, nothing } from 'lit';
@@ -43,11 +44,13 @@ interface MaintenanceOperation {
 
 interface MaintenanceRun {
   id: string;
+  operationKey?: string;
   status: string;
   startedAt: string;
   completedAt?: string;
   startedBy?: string;
   result?: string;
+  log?: string;
 }
 
 interface MaintenanceOperationWithRun extends MaintenanceOperation {
@@ -77,16 +80,32 @@ export class ScionPageAdminMaintenance extends LitElement {
   @state()
   private runDialogKey: string | null = null;
 
+  /** Category of the item being run (migration or operation). */
+  @state()
+  private runDialogCategory: string = 'migration';
+
   /** Dry-run checkbox state in the run dialog. */
   @state()
   private runDialogDryRun = false;
 
-  /** Whether a migration run request is in-flight. */
+  /** Whether a run request is in-flight. */
   @state()
   private runInProgress = false;
 
-  /** Polling timer for running migrations. */
+  /** Polling timer for running operations/migrations. */
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Keys of operations whose run history is expanded. */
+  @state()
+  private expandedHistory: Set<string> = new Set();
+
+  /** Loaded run history keyed by operation key. */
+  @state()
+  private runHistory: Map<string, MaintenanceRun[]> = new Map();
+
+  /** Run detail currently being viewed. */
+  @state()
+  private viewingRun: MaintenanceRun | null = null;
 
   static override styles = css`
     :host {
@@ -112,7 +131,7 @@ export class ScionPageAdminMaintenance extends LitElement {
       margin: 0;
     }
 
-    /* ── Sections ───────────────────────────────────────────────────── */
+    /* -- Sections --------------------------------------------------------- */
 
     .section {
       background: var(--scion-surface, #ffffff);
@@ -135,7 +154,7 @@ export class ScionPageAdminMaintenance extends LitElement {
       margin: 0 0 1rem 0;
     }
 
-    /* ── Cards ───────────────────────────────────────────────────────── */
+    /* -- Cards ------------------------------------------------------------ */
 
     .card-list {
       display: flex;
@@ -212,7 +231,7 @@ export class ScionPageAdminMaintenance extends LitElement {
       margin-top: 0.75rem;
     }
 
-    /* ── Result log ─────────────────────────────────────────────────── */
+    /* -- Result log ------------------------------------------------------- */
 
     .result-log {
       margin-top: 0.75rem;
@@ -232,7 +251,7 @@ export class ScionPageAdminMaintenance extends LitElement {
       color: var(--sl-color-danger-700, #b91c1c);
     }
 
-    /* ── Status badges ──────────────────────────────────────────────── */
+    /* -- Status badges ---------------------------------------------------- */
 
     .status-badge {
       display: inline-flex;
@@ -263,7 +282,64 @@ export class ScionPageAdminMaintenance extends LitElement {
       color: var(--sl-color-primary-700, #1d4ed8);
     }
 
-    /* ── Dialog ──────────────────────────────────────────────────────── */
+    /* -- Run history table ------------------------------------------------ */
+
+    .history-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.8125rem;
+      color: var(--scion-primary, #3b82f6);
+      cursor: pointer;
+      border: none;
+      background: none;
+      padding: 0.25rem 0;
+      margin-top: 0.5rem;
+    }
+
+    .history-toggle:hover {
+      text-decoration: underline;
+    }
+
+    .history-toggle sl-icon {
+      font-size: 0.75rem;
+      transition: transform 0.2s;
+    }
+
+    .history-toggle.expanded sl-icon {
+      transform: rotate(90deg);
+    }
+
+    .run-history-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.75rem;
+      font-size: 0.8125rem;
+    }
+
+    .run-history-table th {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--scion-border, #e2e8f0);
+      color: var(--scion-text-muted, #64748b);
+      font-weight: 500;
+    }
+
+    .run-history-table td {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--scion-border-subtle, #f1f5f9);
+      color: var(--scion-text, #1e293b);
+    }
+
+    .run-history-table tr {
+      cursor: pointer;
+    }
+
+    .run-history-table tr:hover td {
+      background: var(--scion-bg-subtle, #f8fafc);
+    }
+
+    /* -- Dialog ----------------------------------------------------------- */
 
     .dialog-body {
       display: flex;
@@ -278,7 +354,7 @@ export class ScionPageAdminMaintenance extends LitElement {
       line-height: 1.5;
     }
 
-    /* ── Empty state ─────────────────────────────────────────────────── */
+    /* -- Empty state ------------------------------------------------------ */
 
     .empty-inline {
       padding: 1.5rem;
@@ -287,7 +363,7 @@ export class ScionPageAdminMaintenance extends LitElement {
       font-size: 0.875rem;
     }
 
-    /* ── Loading / Error ─────────────────────────────────────────────── */
+    /* -- Loading / Error -------------------------------------------------- */
 
     .loading-state {
       display: flex;
@@ -364,8 +440,11 @@ export class ScionPageAdminMaintenance extends LitElement {
       this.migrations = data.migrations ?? [];
       this.operations = data.operations ?? [];
 
-      // Start polling if any migration is currently running.
-      if (this.migrations.some((m) => m.status === 'running')) {
+      // Start polling if any migration or operation run is active.
+      const hasRunning =
+        this.migrations.some((m) => m.status === 'running') ||
+        this.operations.some((op) => op.lastRun?.status === 'running');
+      if (hasRunning) {
         this.startPolling();
       } else {
         this.stopPolling();
@@ -405,6 +484,23 @@ export class ScionPageAdminMaintenance extends LitElement {
     }
   }
 
+  private formatDateTime(dateString: string | undefined): string {
+    if (!dateString) return '';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return '';
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return dateString;
+    }
+  }
+
   private formatRelativeTime(dateString: string | undefined): string {
     if (!dateString) return '';
     try {
@@ -432,6 +528,24 @@ export class ScionPageAdminMaintenance extends LitElement {
     }
   }
 
+  private formatDuration(startStr: string, endStr?: string): string {
+    if (!startStr || !endStr) return '--';
+    try {
+      const start = new Date(startStr).getTime();
+      const end = new Date(endStr).getTime();
+      const diffMs = end - start;
+      if (diffMs < 0 || isNaN(diffMs)) return '--';
+      if (diffMs < 1000) return '<1s';
+      const seconds = Math.round(diffMs / 1000);
+      if (seconds < 60) return `${seconds}s`;
+      const minutes = Math.floor(seconds / 60);
+      const remainSecs = seconds % 60;
+      return `${minutes}m ${remainSecs}s`;
+    } catch {
+      return '--';
+    }
+  }
+
   private statusIcon(status: string): string {
     switch (status) {
       case 'completed':
@@ -445,10 +559,11 @@ export class ScionPageAdminMaintenance extends LitElement {
     }
   }
 
-  // ── Migration execution ──────────────────────────────────────────
+  // -- Migration execution ------------------------------------------------
 
-  private openRunDialog(key: string): void {
+  private openRunDialog(key: string, category: string): void {
     this.runDialogKey = key;
+    this.runDialogCategory = category;
     this.runDialogDryRun = false;
   }
 
@@ -496,6 +611,103 @@ export class ScionPageAdminMaintenance extends LitElement {
     }
   }
 
+  // -- Operation execution ------------------------------------------------
+
+  private async executeRunOperation(): Promise<void> {
+    if (!this.runDialogKey) return;
+
+    this.runInProgress = true;
+    try {
+      const response = await apiFetch(
+        `/api/v1/admin/maintenance/operations/${this.runDialogKey}/run`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ params: {} }),
+        },
+      );
+
+      if (!response.ok) {
+        const errMsg = await extractApiError(response, `HTTP ${response.status}`);
+        throw new Error(errMsg);
+      }
+
+      this.runDialogKey = null;
+
+      // Reload and start polling for status.
+      await this.loadData();
+      this.startPolling();
+    } catch (err) {
+      console.error('Failed to start operation:', err);
+      this.error = err instanceof Error ? err.message : 'Failed to start operation';
+    } finally {
+      this.runInProgress = false;
+    }
+  }
+
+  // -- Run history --------------------------------------------------------
+
+  private async toggleHistory(key: string): Promise<void> {
+    const expanded = new Set(this.expandedHistory);
+    if (expanded.has(key)) {
+      expanded.delete(key);
+      this.expandedHistory = expanded;
+      return;
+    }
+
+    expanded.add(key);
+    this.expandedHistory = expanded;
+
+    // Load history if not cached.
+    if (!this.runHistory.has(key)) {
+      await this.loadRunHistory(key);
+    }
+  }
+
+  private async loadRunHistory(key: string): Promise<void> {
+    try {
+      const response = await apiFetch(
+        `/api/v1/admin/maintenance/operations/${key}/runs?limit=20`,
+      );
+      if (!response.ok) return;
+
+      const data = (await response.json()) as { runs: MaintenanceRun[] | null };
+      const updated = new Map(this.runHistory);
+      updated.set(key, data.runs ?? []);
+      this.runHistory = updated;
+    } catch {
+      // Silently ignore load errors for history.
+    }
+  }
+
+  private async viewRunDetail(run: MaintenanceRun): Promise<void> {
+    // If we already have log data, show it immediately.
+    if (run.log) {
+      this.viewingRun = run;
+      return;
+    }
+
+    // Otherwise fetch the full run detail.
+    try {
+      const key = run.operationKey ?? '';
+      const response = await apiFetch(
+        `/api/v1/admin/maintenance/operations/${key}/runs/${run.id}`,
+      );
+      if (response.ok) {
+        const detail = (await response.json()) as MaintenanceRun;
+        this.viewingRun = detail;
+      } else {
+        this.viewingRun = run;
+      }
+    } catch {
+      this.viewingRun = run;
+    }
+  }
+
+  private closeRunDetail(): void {
+    this.viewingRun = null;
+  }
+
   private parseMigrationResult(resultStr: string | undefined): { log?: string; error?: string; dryRun?: boolean } | null {
     if (!resultStr) return null;
     try {
@@ -505,7 +717,7 @@ export class ScionPageAdminMaintenance extends LitElement {
     }
   }
 
-  // ── Rendering ────────────────────────────────────────────────────
+  // -- Rendering ----------------------------------------------------------
 
   override render() {
     return html`
@@ -521,6 +733,7 @@ export class ScionPageAdminMaintenance extends LitElement {
           : this.renderContent()}
 
       ${this.renderRunDialog()}
+      ${this.renderRunDetailDialog()}
     `;
   }
 
@@ -616,7 +829,7 @@ export class ScionPageAdminMaintenance extends LitElement {
                       <sl-button
                         variant="primary"
                         size="small"
-                        @click=${() => this.openRunDialog(m.key)}
+                        @click=${() => this.openRunDialog(m.key, 'migration')}
                       >
                         <sl-icon slot="prefix" name="play-circle"></sl-icon>
                         ${m.status === 'failed' ? 'Retry' : 'Run'}
@@ -639,7 +852,7 @@ export class ScionPageAdminMaintenance extends LitElement {
       <div class="section">
         <h2 class="section-title">Routine Operations</h2>
         <p class="section-description">
-          Repeatable infrastructure tasks. Execution will be available in a future update.
+          Repeatable infrastructure tasks that can be run on demand.
         </p>
         ${this.operations.length === 0
           ? html`<div class="empty-inline">No operations registered.</div>`
@@ -653,11 +866,29 @@ export class ScionPageAdminMaintenance extends LitElement {
   }
 
   private renderOperationCard(op: MaintenanceOperationWithRun) {
+    const isRunning = op.lastRun?.status === 'running';
+    const historyExpanded = this.expandedHistory.has(op.key);
+    const runs = this.runHistory.get(op.key) ?? [];
+
     return html`
       <div class="card">
         <div class="card-header">
-          <sl-icon name="play-circle" class="pending"></sl-icon>
+          ${isRunning
+            ? html`<sl-spinner style="font-size: 1.25rem;"></sl-spinner>`
+            : html`<sl-icon name="play-circle" class="pending"></sl-icon>`}
           <span class="card-title">${op.title}</span>
+          ${isRunning
+            ? html`<sl-button size="small" disabled loading>Running...</sl-button>`
+            : html`
+                <sl-button
+                  variant="primary"
+                  size="small"
+                  @click=${() => this.openRunDialog(op.key, 'operation')}
+                >
+                  <sl-icon slot="prefix" name="play-circle"></sl-icon>
+                  Run
+                </sl-button>
+              `}
         </div>
         <div class="card-description">${op.description}</div>
         ${op.lastRun
@@ -677,12 +908,59 @@ export class ScionPageAdminMaintenance extends LitElement {
                 <span>Never run</span>
               </div>
             `}
+        <button
+          class="history-toggle ${historyExpanded ? 'expanded' : ''}"
+          @click=${() => this.toggleHistory(op.key)}
+        >
+          <sl-icon name="chevron-right"></sl-icon>
+          Run History
+        </button>
+        ${historyExpanded ? this.renderRunHistoryTable(op.key, runs) : nothing}
       </div>
+    `;
+  }
+
+  private renderRunHistoryTable(key: string, runs: MaintenanceRun[]) {
+    if (runs.length === 0) {
+      return html`<div class="empty-inline">No runs recorded yet.</div>`;
+    }
+
+    return html`
+      <table class="run-history-table">
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>Duration</th>
+            <th>Status</th>
+            <th>By</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${runs.map(
+            (run) => html`
+              <tr @click=${() => this.viewRunDetail({ ...run, operationKey: key })}>
+                <td>${this.formatDateTime(run.startedAt)}</td>
+                <td>${this.formatDuration(run.startedAt, run.completedAt)}</td>
+                <td><span class="status-badge ${run.status}">${run.status}</span></td>
+                <td>${run.startedBy ?? '--'}</td>
+              </tr>
+            `,
+          )}
+        </tbody>
+      </table>
     `;
   }
 
   private renderRunDialog() {
     if (!this.runDialogKey) return nothing;
+
+    if (this.runDialogCategory === 'migration') {
+      return this.renderMigrationRunDialog();
+    }
+    return this.renderOperationRunDialog();
+  }
+
+  private renderMigrationRunDialog() {
     const migration = this.migrations.find((m) => m.key === this.runDialogKey);
     if (!migration) return nothing;
 
@@ -719,6 +997,83 @@ export class ScionPageAdminMaintenance extends LitElement {
           <sl-icon slot="prefix" name="play-circle"></sl-icon>
           ${this.runDialogDryRun ? 'Dry Run' : 'Run Migration'}
         </sl-button>
+      </sl-dialog>
+    `;
+  }
+
+  private renderOperationRunDialog() {
+    const operation = this.operations.find((op) => op.key === this.runDialogKey);
+    if (!operation) return nothing;
+
+    const isDestructive = this.runDialogKey === 'rebuild-server';
+
+    return html`
+      <sl-dialog
+        label="Run Operation"
+        open
+        @sl-request-close=${() => this.closeRunDialog()}
+      >
+        <div class="dialog-body">
+          <p><strong>${operation.title}</strong></p>
+          <p>${operation.description}</p>
+          ${isDestructive
+            ? html`<p style="color: var(--sl-color-warning-700, #a16207); font-weight: 500;">
+                This operation will restart the server. You will temporarily lose connectivity.
+              </p>`
+            : nothing}
+        </div>
+        <sl-button
+          slot="footer"
+          variant="default"
+          @click=${() => this.closeRunDialog()}
+          ?disabled=${this.runInProgress}
+        >Cancel</sl-button>
+        <sl-button
+          slot="footer"
+          variant="${isDestructive ? 'warning' : 'primary'}"
+          ?loading=${this.runInProgress}
+          @click=${() => this.executeRunOperation()}
+        >
+          <sl-icon slot="prefix" name="play-circle"></sl-icon>
+          Run
+        </sl-button>
+      </sl-dialog>
+    `;
+  }
+
+  private renderRunDetailDialog() {
+    if (!this.viewingRun) return nothing;
+    const run = this.viewingRun;
+    const result = this.parseMigrationResult(run.result);
+
+    return html`
+      <sl-dialog
+        label="Run Detail"
+        open
+        @sl-request-close=${() => this.closeRunDetail()}
+        style="--width: 48rem;"
+      >
+        <div class="dialog-body">
+          <div class="card-meta">
+            <span>Status: <span class="status-badge ${run.status}">${run.status}</span></span>
+            <span>Started: ${this.formatDateTime(run.startedAt)}</span>
+            ${run.completedAt
+              ? html`<span>Duration: ${this.formatDuration(run.startedAt, run.completedAt)}</span>`
+              : nothing}
+            ${run.startedBy ? html`<span>By: ${run.startedBy}</span>` : nothing}
+          </div>
+          ${result?.error
+            ? html`<div class="result-log result-error">${result.error}</div>`
+            : nothing}
+          ${run.log
+            ? html`<div class="result-log">${run.log}</div>`
+            : html`<div class="empty-inline">No log output captured.</div>`}
+        </div>
+        <sl-button
+          slot="footer"
+          variant="default"
+          @click=${() => this.closeRunDetail()}
+        >Close</sl-button>
       </sl-dialog>
     `;
   }

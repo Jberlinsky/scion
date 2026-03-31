@@ -550,7 +550,7 @@ type MaintenanceStore interface {
 - Add `MaintenanceExecutor` interface for future operation executors.
 - Add status polling for running migrations.
 
-### Phase 3: Routine Operations
+### Phase 3: Routine Operations -- COMPLETE
 
 - Add the operation runs table and run endpoints.
 - Implement `PullImagesExecutor` and `RebuildServerExecutor`.
