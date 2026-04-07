@@ -162,28 +162,6 @@ func (a *Adapter) handleEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// For command events the Workspace Add-on framework opens a transient
-	// dialog while waiting for the webhook response.  Returning an empty
-	// body leaves that dialog in a broken state and produces a
-	// "Server error occurred" toast.  Close it explicitly so the async
-	// message (already sent by the handler) is the only thing the user sees.
-	if event.Type == chatapp.EventCommand {
-		a.log.Info("closing transient command dialog", "type", event.Type)
-		payload := map[string]any{
-			"action": map[string]any{
-				"navigations": []any{
-					map[string]any{"endNavigation": "CLOSE_DIALOG"},
-				},
-			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(payload); err != nil {
-			a.log.Error("encoding command close response", "error", err)
-		}
-		return
-	}
-
 	a.log.Debug("sending empty 200 response", "type", event.Type)
 	w.WriteHeader(http.StatusOK)
 }
