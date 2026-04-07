@@ -319,9 +319,16 @@ type V1PluginsConfig struct {
 type V1PluginEntry struct {
 	// Path is the explicit filesystem path to the plugin binary.
 	// If empty, discovery will attempt to find it automatically.
+	// Ignored when SelfManaged is true.
 	Path string `json:"path,omitempty" yaml:"path,omitempty" koanf:"path"`
 	// Config is an opaque key-value map passed to the plugin via Configure().
 	Config map[string]string `json:"config,omitempty" yaml:"config,omitempty" koanf:"config"`
+	// SelfManaged indicates the plugin manages its own process lifecycle.
+	// The Hub connects to the plugin's RPC server rather than starting it.
+	SelfManaged bool `json:"self_managed,omitempty" yaml:"self_managed,omitempty" koanf:"self_managed"`
+	// Address is the RPC address for self-managed plugins (e.g. "localhost:9090").
+	// Required when SelfManaged is true.
+	Address string `json:"address,omitempty" yaml:"address,omitempty" koanf:"address"`
 }
 
 // V1ServerHubConfig holds the Hub API server settings (when running scion-server).

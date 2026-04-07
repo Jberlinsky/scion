@@ -1130,14 +1130,18 @@ func initPluginManager() *scionplugin.Manager {
 	}
 	for name, entry := range vs.Server.Plugins.Broker {
 		pluginsCfg.Broker[name] = scionplugin.PluginEntry{
-			Path:   entry.Path,
-			Config: entry.Config,
+			Path:        entry.Path,
+			Config:      entry.Config,
+			SelfManaged: entry.SelfManaged,
+			Address:     entry.Address,
 		}
 	}
 	for name, entry := range vs.Server.Plugins.Harness {
 		pluginsCfg.Harness[name] = scionplugin.PluginEntry{
-			Path:   entry.Path,
-			Config: entry.Config,
+			Path:        entry.Path,
+			Config:      entry.Config,
+			SelfManaged: entry.SelfManaged,
+			Address:     entry.Address,
 		}
 	}
 
