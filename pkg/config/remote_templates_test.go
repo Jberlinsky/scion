@@ -171,17 +171,17 @@ func TestNormalizeTemplateSourceURL(t *testing.T) {
 		{
 			name:     "bare org/repo appends scion templates path",
 			input:    "https://github.com/org/repo",
-			expected: "https://github.com/org/repo/.scion/templates/",
+			expected: "https://github.com/org/repo/tree/main/.scion/templates",
 		},
 		{
 			name:     "scheme-less bare org/repo gets scheme and scion templates path",
 			input:    "github.com/org/repo",
-			expected: "https://github.com/org/repo/.scion/templates/",
+			expected: "https://github.com/org/repo/tree/main/.scion/templates",
 		},
 		{
 			name:     "GitHub.com capitalized is normalized",
 			input:    "GitHub.com/org/repo",
-			expected: "https://GitHub.com/org/repo/.scion/templates/",
+			expected: "https://GitHub.com/org/repo/tree/main/.scion/templates",
 		},
 		{
 			name:     "rclone prefix left unchanged",
@@ -196,7 +196,7 @@ func TestNormalizeTemplateSourceURL(t *testing.T) {
 		{
 			name:     "whitespace trimmed",
 			input:    "  github.com/org/repo  ",
-			expected: "https://github.com/org/repo/.scion/templates/",
+			expected: "https://github.com/org/repo/tree/main/.scion/templates",
 		},
 		{
 			name:     "deeper path not modified",

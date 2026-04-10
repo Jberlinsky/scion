@@ -95,7 +95,9 @@ func NormalizeTemplateSourceURL(raw string) string {
 		}
 		if len(parts) == 2 {
 			// Just owner/repo — point to the standard templates directory
-			u.Path = "/" + parts[0] + "/" + parts[1] + "/.scion/templates/"
+			// Include /tree/main so the URL is a valid GitHub browsable path
+			// and parseGitHubURL can correctly extract the branch and sub-path.
+			u.Path = "/" + parts[0] + "/" + parts[1] + "/tree/main/.scion/templates"
 			return u.String()
 		}
 	}
