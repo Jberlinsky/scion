@@ -67,7 +67,7 @@ If you have the repository cloned, you can use the provided `Makefile`:
 make build
 # This creates a 'scion' binary in the current directory.
 # You can move it to a directory in your PATH:
-mv scion /usr/local/bin/
+sudo mv ./build/scion /usr/local/bin/
 ```
 
 To verify your installation, run:
