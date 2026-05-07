@@ -70,7 +70,7 @@ make all
 # You can add ~/.local/bin/ to your PATH, or `mv` the binary to another directory in your PATH
 ```
 
-Alternatively, if you don't need the web UI, you can use `make build` to only compile the CLI into `./build/scion` (the web UI will show a placeholder page).
+Alternatively, if you don't need the web UI, you can build the CLI-only version using the no_embed_web tag: go build -tags no_embed_web -o ./build/scion ./cmd/scion (the web UI will show a placeholder page).
 
 To verify your installation, run:
 
